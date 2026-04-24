@@ -88,6 +88,21 @@
     "graphEgo": "Ego-grafo",
     "graphTimeline": "Grafo Temporal"
   },
+  "help": {
+    "button": {
+      "label": "Guia",
+      "aria": "Abrir guia desta tela"
+    },
+    "close": "Fechar",
+    "section": {
+      "objetivo": "Objetivo",
+      "problema": "Problema que resolve",
+      "comoFunciona": "Como funciona",
+      "fluxo": "Fluxo sugerido",
+      "regras": "Regras-chave"
+    },
+    "footer": "Guia escrito em linguagem simples para apoiar o uso diário da tela."
+  },
   "graphGlobal": {
     "title": "Grafo Global",
     "subtitle": "Mapa completo das memórias, agrupadas por comunidade",

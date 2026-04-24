@@ -2,6 +2,7 @@ import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import {
   Menu,
   X,
+  HelpCircle,
   FileText,
   Activity,
   LayoutDashboard,
@@ -34,19 +35,66 @@ import {
   GitBranch,
   Hourglass,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { ThemeSelector } from "@/components/ui/theme-selector";
 import { LanguageSwitcher } from "@/components/ui/language-switcher";
+import { ScreenHelp } from "@/components/ui/ScreenHelp";
+import { getHelpContent } from "@/lib/help/helpContent";
 import { useAuth } from "@/contexts/AuthContext";
+
+const VISITED_KEY = "brainsentry.help.visited";
+
+function loadVisitedRoutes(): Set<string> {
+  try {
+    const raw = localStorage.getItem(VISITED_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveVisitedRoutes(routes: Set<string>) {
+  try {
+    localStorage.setItem(VISITED_KEY, JSON.stringify(Array.from(routes)));
+  } catch {
+    // storage unavailable — non-critical
+  }
+}
 
 export function AdminLayout() {
   const { t, i18n } = useTranslation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [visited, setVisited] = useState<Set<string>>(() => loadVisitedRoutes());
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+
+  const helpRoute = (() => {
+    const parts = location.pathname.split("/");
+    while (parts.length > 2) {
+      const candidate = parts.join("/");
+      if (getHelpContent(candidate)) return candidate;
+      parts.pop();
+    }
+    return location.pathname;
+  })();
+
+  const helpAvailable = Boolean(getHelpContent(helpRoute));
+  const isNewScreen = helpAvailable && !visited.has(helpRoute);
+
+  useEffect(() => {
+    if (helpOpen && helpAvailable && !visited.has(helpRoute)) {
+      const next = new Set(visited);
+      next.add(helpRoute);
+      setVisited(next);
+      saveVisitedRoutes(next);
+    }
+  }, [helpOpen, helpAvailable, helpRoute, visited]);
 
   const navigation = [
     { title: t("nav.dashboard"), href: "/app/dashboard", icon: LayoutDashboard, id: "dashboard" },
@@ -199,9 +247,42 @@ export function AdminLayout() {
       )}
 
       {/* Main content */}
-      <main className="flex-1 overflow-y-auto min-h-0">
+      <main className="flex-1 overflow-y-auto min-h-0 relative">
         <Outlet />
+
+        {/* Floating help button — reads current route and opens ScreenHelp */}
+        {helpAvailable && (
+          <button
+            type="button"
+            data-testid="screen-help-trigger"
+            aria-label={t("help.button.aria")}
+            onClick={() => setHelpOpen(true)}
+            className={cn(
+              "fixed bottom-5 left-5 md:left-[17rem] z-40 flex items-center gap-2 rounded-full shadow-lg",
+              "px-3.5 py-2.5 text-xs font-medium transition-all",
+              "bg-gradient-to-r from-brain-primary to-brain-accent text-white",
+              "hover:shadow-xl hover:scale-[1.03]",
+            )}
+          >
+            <HelpCircle className="h-4 w-4" />
+            <span className="hidden sm:inline">{t("help.button.label")}</span>
+            {isNewScreen && (
+              <span
+                data-testid="screen-help-new-badge"
+                className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-red-500 border-2 border-background"
+              />
+            )}
+          </button>
+        )}
       </main>
+
+      {helpAvailable && (
+        <ScreenHelp
+          open={helpOpen}
+          onClose={() => setHelpOpen(false)}
+          route={helpRoute}
+        />
+      )}
     </div>
   );
 }

@@ -88,6 +88,21 @@
     "graphEgo": "Ego Graph",
     "graphTimeline": "Timeline Graph"
   },
+  "help": {
+    "button": {
+      "label": "Guide",
+      "aria": "Open guide for this screen"
+    },
+    "close": "Close",
+    "section": {
+      "objetivo": "Goal",
+      "problema": "Problem it solves",
+      "comoFunciona": "How it works",
+      "fluxo": "Suggested flow",
+      "regras": "Key rules"
+    },
+    "footer": "Guide written in plain language to support daily use of the screen."
+  },
   "graphGlobal": {
     "title": "Global Graph",
     "subtitle": "Full memory map grouped by community",
