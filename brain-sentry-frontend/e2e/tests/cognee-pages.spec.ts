@@ -60,8 +60,8 @@ test.describe("Cognee P1-P3 Pages", () => {
     await expect(authenticatedPage.getByText("POST /v1/recall").first()).toBeVisible();
     await expect(authenticatedPage.getByText(/upstream timeout/i)).toBeVisible();
 
-    // Expand first row
-    await authenticatedPage.locator("button:has(svg.lucide-chevron-down)").first().click();
+    // Expand first row (scope to <main> so we don't catch sidebar group chevrons)
+    await authenticatedPage.locator("main button:has(svg.lucide-chevron-down)").first().click();
     await expect(authenticatedPage.getByText("Parâmetros", { exact: true })).toBeVisible();
   });
 
@@ -204,9 +204,15 @@ test.describe("Cognee P1-P3 Pages", () => {
 
     await authenticatedPage.getByPlaceholder("eu-west-1").fill("us-east-1");
     await authenticatedPage.getByPlaceholder("https://peer.example.com").fill("https://us.example.com");
-    await authenticatedPage.getByRole("button", { name: /^Registrar$/i }).click();
 
-    await expect(authenticatedPage.getByText(/Peer registrado/i)).toBeVisible();
+    // Race the toast against the auto-dismiss (5s) by waiting on the network
+    // response then asserting visibility before the toast fades out.
+    const registerResponse = authenticatedPage.waitForResponse(
+      (res) => res.url().includes("/v1/mesh/peers") && res.request().method() === "POST",
+    );
+    await authenticatedPage.getByRole("button", { name: /^Registrar$/i }).click();
+    await registerResponse;
+    await expect(authenticatedPage.getByText(/Peer registrado/i)).toBeVisible({ timeout: 4000 });
   });
 
   // ---------------- Batch Search ----------------

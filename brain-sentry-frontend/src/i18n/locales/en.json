@@ -86,7 +86,16 @@
     "provenance": "Provenance",
     "graphGlobal": "Global Graph",
     "graphEgo": "Ego Graph",
-    "graphTimeline": "Timeline Graph"
+    "graphTimeline": "Timeline Graph",
+    "group": {
+      "knowledge": "Knowledge",
+      "graphs": "Graphs",
+      "decisions": "Decisions & Governance",
+      "intelligence": "Intelligence",
+      "coordination": "Coordination",
+      "analysis": "Analysis",
+      "admin": "Administration"
+    }
   },
   "help": {
     "button": {

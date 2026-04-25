@@ -86,7 +86,16 @@
     "provenance": "Proveniência",
     "graphGlobal": "Grafo Global",
     "graphEgo": "Ego-grafo",
-    "graphTimeline": "Grafo Temporal"
+    "graphTimeline": "Grafo Temporal",
+    "group": {
+      "knowledge": "Conhecimento",
+      "graphs": "Grafos",
+      "decisions": "Decisões & Governança",
+      "intelligence": "Inteligência",
+      "coordination": "Coordenação",
+      "analysis": "Análise",
+      "admin": "Administração"
+    }
   },
   "help": {
     "button": {
