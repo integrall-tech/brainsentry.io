@@ -37,6 +37,33 @@ test.describe("Navigation", () => {
     await expect(authenticatedPage).toHaveURL(/\/app\/dashboard/);
   });
 
+  test("sidebar collapses to rail mode and persists across reload", async ({ authenticatedPage }) => {
+    const sidebar = authenticatedPage.getByTestId("sidebar");
+    await expect(sidebar).toHaveAttribute("data-collapsed", "false");
+
+    // Group label is visible when expanded
+    await expect(authenticatedPage.getByRole("button", { name: "Conhecimento" })).toBeVisible();
+
+    // Collapse
+    await authenticatedPage.getByTestId("sidebar-toggle").click();
+    await expect(sidebar).toHaveAttribute("data-collapsed", "true");
+
+    // Group labels gone in rail mode
+    await expect(authenticatedPage.getByRole("button", { name: "Conhecimento" })).toHaveCount(0);
+
+    // Item icons still navigate (use title fallback)
+    await authenticatedPage.getByRole("button", { name: "Memórias" }).click();
+    await expect(authenticatedPage).toHaveURL(/\/app\/memories/);
+
+    // Reload preserves collapsed state via localStorage
+    await authenticatedPage.reload();
+    await expect(authenticatedPage.getByTestId("sidebar")).toHaveAttribute("data-collapsed", "true");
+
+    // Toggle back to expanded for downstream tests
+    await authenticatedPage.getByTestId("sidebar-toggle").click();
+    await expect(authenticatedPage.getByTestId("sidebar")).toHaveAttribute("data-collapsed", "false");
+  });
+
   test("navigates to new Cognee pages", async ({ authenticatedPage }) => {
     const sidebar = new Sidebar(authenticatedPage);
 

@@ -95,7 +95,9 @@
       "coordination": "Coordenação",
       "analysis": "Análise",
       "admin": "Administração"
-    }
+    },
+    "collapseSidebar": "Recolher menu",
+    "expandSidebar": "Expandir menu"
   },
   "help": {
     "button": {
