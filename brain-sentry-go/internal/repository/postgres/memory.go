@@ -452,6 +452,29 @@ func (r *MemoryRepository) SaveEmbedding(ctx context.Context, id string, embeddi
 	return err
 }
 
+// NullifyAllEmbeddings clears the embedding column on every memory across
+// every tenant. Returns the number of rows touched. Intentionally NOT
+// tenant-scoped — this is operator-level rebuild surface; callers must
+// gate it (see internal/rebuild + trust.RequireLocalTrust).
+func (r *MemoryRepository) NullifyAllEmbeddings(ctx context.Context) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `UPDATE memories SET embedding = NULL WHERE embedding IS NOT NULL`)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// WipeAllContextSummaries truncates the LLM-compressed context_summaries
+// family across every tenant. Child tables fall via ON DELETE CASCADE.
+// Returns the number of summaries removed.
+func (r *MemoryRepository) WipeAllContextSummaries(ctx context.Context) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM context_summaries`)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 // FindByEmbeddingSimilarity finds memories by cosine similarity (PostgreSQL-based fallback).
 func (r *MemoryRepository) FindByEmbeddingSimilarity(ctx context.Context, embedding []float32, limit int) ([]domain.Memory, error) {
 	// This is a fallback; primary vector search should use FalkorDB.

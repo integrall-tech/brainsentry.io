@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -21,10 +23,12 @@ import (
 	modelsrouting "github.com/integraltech/brainsentry/internal/models"
 	"github.com/integraltech/brainsentry/internal/mcp"
 	"github.com/integraltech/brainsentry/internal/middleware"
+	"github.com/integraltech/brainsentry/internal/rebuild"
 	graphrepo "github.com/integraltech/brainsentry/internal/repository/graph"
 	"github.com/integraltech/brainsentry/internal/repository/postgres"
 	"github.com/integraltech/brainsentry/internal/service"
 	"github.com/integraltech/brainsentry/pkg/lazy"
+	"github.com/integraltech/brainsentry/pkg/trust"
 )
 
 func main() {
@@ -33,6 +37,14 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
+
+	// Operator-mode flags. --rebuild + --confirm-destructive run the
+	// rebuild executor in-process after services are wired, then exit.
+	// Trust elevation lives here (not in the HTTP path) — process is
+	// already on the operator's host.
+	rebuildTargets := flag.String("rebuild", "", "comma-separated rebuild targets (e.g. graph,embeddings,communities,compress); when set, run them and exit")
+	rebuildConfirm := flag.Bool("confirm-destructive", false, "required to actually run --rebuild; without it, rebuild dry-runs")
+	flag.Parse()
 
 	// Config
 	cfgPath := "config.yaml"
@@ -651,6 +663,34 @@ func main() {
 	}
 	modelsHandler := handler.NewModelsHandler(modelsCfg, modelsProber)
 
+	// Rebuild executor: register concrete rebuilders for every derived
+	// store. Each is a thin closure over the corresponding repo/service
+	// already wired above. Targets land in alphabetical order in the
+	// report — see internal/rebuild/service.go for the contract.
+	rebuildSvc := rebuild.New()
+	if memoryGraphRepo != nil && memoryRepo != nil {
+		_ = rebuildSvc.Register("graph", rebuild.GraphRebuilder(memoryRepo, memoryGraphRepo))
+	}
+	_ = rebuildSvc.Register("embeddings", rebuild.EmbeddingsRebuilder(memoryRepo))
+	_ = rebuildSvc.Register("compress", rebuild.CompressRebuilder(memoryRepo))
+	if louvainService != nil {
+		commAdapter := rebuild.NewCommunityAdapter(tenantRepo, func(ctx context.Context, tenantID string) (int, error) {
+			res, err := louvainService.DetectCommunities(ctx, tenantID)
+			if err != nil || res == nil {
+				return 0, err
+			}
+			return len(res.Communities), nil
+		})
+		_ = rebuildSvc.Register("communities", rebuild.CommunitiesRebuilder(commAdapter))
+	}
+
+	// --rebuild=<targets> mode: run executor in-process, print report,
+	// exit. Skips HTTP server entirely. Trust elevation lives here, on
+	// the operator's host. --confirm-destructive is required.
+	if *rebuildTargets != "" {
+		runRebuildAndExit(logger, rebuildSvc, *rebuildTargets, *rebuildConfirm)
+	}
+
 	var activationHandler *handler.ActivationHandler
 	if spreadingActivationService != nil {
 		activationHandler = handler.NewActivationHandler(spreadingActivationService)
@@ -1178,4 +1218,50 @@ func main() {
 	}
 
 	logger.Info("server stopped")
+}
+
+// runRebuildAndExit executes the requested rebuild targets in-process and
+// exits. Reached only when `--rebuild=<targets>` was passed. Trust is
+// elevated to Local: the process is on the operator's host, so the same
+// guarantee that protects HTTP-borne destructive ops is unnecessary here.
+func runRebuildAndExit(logger *slog.Logger, svc *rebuild.Service, targetsCSV string, confirm bool) {
+	targets := splitNonEmpty(targetsCSV, ",")
+	if !confirm {
+		fmt.Println("brainsentry rebuild — DRY RUN (re-run with --confirm-destructive to execute)")
+		fmt.Println("would run:", strings.Join(targets, ", "))
+		fmt.Println("registered targets:", strings.Join(svc.Targets(), ", "))
+		os.Exit(0)
+	}
+	ctx, cancel := context.WithTimeout(trust.WithLocal(context.Background()), 30*time.Minute)
+	defer cancel()
+	rep := svc.Run(ctx, targets)
+	fmt.Printf("brainsentry rebuild — completed in %dms\n", rep.Duration.Milliseconds())
+	for _, r := range rep.Results {
+		mark := "PASS"
+		if !r.OK {
+			mark = "FAIL"
+		}
+		fmt.Printf("  [%s] %-12s touched=%d duration=%dms", mark, r.Target, r.Touched, r.Duration.Milliseconds())
+		if r.Error != "" {
+			fmt.Printf("  err=%s", r.Error)
+		}
+		fmt.Println()
+	}
+	if !rep.OK {
+		logger.Error("rebuild failed", "targets", targets)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func splitNonEmpty(s, sep string) []string {
+	parts := strings.Split(s, sep)
+	out := parts[:0]
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

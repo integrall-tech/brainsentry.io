@@ -76,24 +76,31 @@ agent recorded it, it is canonical.
 
 ## The Rebuild Contract
 
-`brainsentry rebuild --from <source> [--confirm-destructive]` reconstructs
-every derived store from canonical Postgres. It is **idempotent** — running
-it twice produces byte-identical artifacts.
+The reconstruction is **in-process on the server host** — the operator
+runs the brainsentry server binary in a one-shot rebuild mode. Trust
+elevation lives there (the process is on the operator's host, not over
+the network) so the same binary can both serve HTTP and execute the
+destructive rebuild.
 
 ```
-brainsentry rebuild --from postgres --confirm-destructive
-  ├─ TRUNCATE communities, compressed_summaries, ...
-  ├─ Drop FalkorDB graph
-  ├─ For every memory:
-  │    ├─ re-embed (calls embedding provider)
-  │    ├─ insert graph node
-  │    └─ insert manually-curated edges
-  ├─ Run Louvain → repopulate communities
-  └─ Run compression → repopulate compressed_summaries
+brainsentry-server --rebuild=graph,embeddings,communities,compress \
+                   --confirm-destructive
+  ├─ graph       — drop FalkorDB graph; re-emit every memory + edges
+  ├─ embeddings  — UPDATE memories SET embedding = NULL  (lazy re-embed)
+  ├─ communities — re-run Louvain per tenant
+  └─ compress    — DELETE FROM context_summaries  (lazy re-compress)
 ```
 
-Disaster recovery is therefore: restore the Postgres backup, run rebuild.
-Nothing else. **No backup of FalkorDB or Redis is part of the
+`brainsentry rebuild` (the planning CLI) prints the dry-run plan +
+points at the server-side command. The same engine powers both:
+`internal/rebuild` is the source of truth, dependency-injected with
+concrete repos at server startup.
+
+Each rebuilder is **idempotent** — running it twice in a row yields the
+same end state.
+
+Disaster recovery is therefore: restore the Postgres backup, run
+rebuild. Nothing else. **No backup of FalkorDB or Redis is part of the
 recovery plan.** Backing them up is a waste of the operator's time and
 gives a false sense of safety.
 

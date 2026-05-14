@@ -74,11 +74,10 @@ brain-sentry-go/docs/architecture/system-of-record.md.`,
 				return nil
 			}
 			fmt.Fprintln(opts.Writer)
-			fmt.Fprintln(opts.Writer, "executing rebuild against the live server is not yet wired in this build.")
-			fmt.Fprintln(opts.Writer, "the engine + plan + CI gate land first; the in-process rebuilder")
-			fmt.Fprintln(opts.Writer, "follows in a separate PR (it requires per-target service callbacks).")
+			fmt.Fprintln(opts.Writer, "to execute, run on the brainsentry server host:")
+			fmt.Fprintf(opts.Writer, "  brainsentry-server --rebuild=%s --confirm-destructive\n", strings.Join(targets, ","))
 			fmt.Fprintln(opts.Writer)
-			fmt.Fprintln(opts.Writer, "for now, manual reconstruction commands per target:")
+			fmt.Fprintln(opts.Writer, "or call the per-target manual recipe (escape hatch):")
 			for _, t := range targets {
 				fmt.Fprintf(opts.Writer, "  %-12s %s\n", t, manualCommandFor(t))
 			}
