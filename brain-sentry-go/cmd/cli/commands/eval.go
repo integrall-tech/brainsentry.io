@@ -140,7 +140,7 @@ so a future-baseline can never silently produce nonsense scores.`,
 	replayCmd.Flags().Float64Var(&opts.Threshold, "threshold", 0.85, "minimum mean jaccard required to PASS")
 	replayCmd.Flags().BoolVar(&opts.JSON, "json", false, "emit JSON summary instead of text")
 
-	cmd.AddCommand(exportCmd, statsCmd, resetCmd, replayCmd)
+	cmd.AddCommand(exportCmd, statsCmd, resetCmd, replayCmd, newCrossModalCmd(nil))
 	return cmd
 }
 
