@@ -1,0 +1,59 @@
+# brainsentry.io
+
+> Plataforma de memória cognitiva para agentes de IA. Memória bi-temporal,
+> spreading activation, auto-forget, compressão LLM, MCP server. Stack: Go +
+> Postgres + pgvector + FalkorDB + React.
+
+This file follows the [llms.txt](https://llmstxt.org) convention. Each link
+below is a path inside this repository.
+
+## Quickstart for agents
+
+- [AGENTS.md](AGENTS.md): 5-minute orientation for any AI agent
+- [CLAUDE.md](CLAUDE.md): annotated key files, invariants, historical bugs
+- [INSTALL_FOR_AGENTS.md](INSTALL_FOR_AGENTS.md): 9-step install in 30 min
+
+## Product
+
+- [README.md](README.md): general overview, stack table, port map
+- [documents/00-PROJECT-OVERVIEW.md](documents/00-PROJECT-OVERVIEW.md): product vision
+- [documents/PROJECT_OVERVIEW.md](documents/PROJECT_OVERVIEW.md): scope, personas
+- [documents/QUICK_START.md](documents/QUICK_START.md): user-facing quickstart
+
+## Architecture
+
+- [documents/BACKEND_SPECIFICATION.md](documents/BACKEND_SPECIFICATION.md): Go backend spec
+- [documents/FRONTEND_SPECIFICATION.md](documents/FRONTEND_SPECIFICATION.md): React frontend spec
+- [documents/MCP_SERVER_API.md](documents/MCP_SERVER_API.md): MCP JSON-RPC + SSE
+- [documents/GRAPH_VISUALIZATION.md](documents/GRAPH_VISUALIZATION.md): Global / Ego / Timeline views
+- [brain-sentry-go/docs/swagger.go](brain-sentry-go/docs/swagger.go): OpenAPI spec source
+
+## Phase plans
+
+- [EXECUTION_PLAN.md](EXECUTION_PLAN.md): rollup of phases
+- [documents/DEVELOPMENT_PHASES.md](documents/DEVELOPMENT_PHASES.md): granular roadmap
+
+## Comparative analyses (lessons learned)
+
+- [documents/ANALYSIS_RAG_TO_AGENT_MEMORY.md](documents/ANALYSIS_RAG_TO_AGENT_MEMORY.md)
+- [documents/ANALISE_CONFUCIUS_VS_BRAINSENTRY.md](documents/ANALISE_CONFUCIUS_VS_BRAINSENTRY.md)
+- [documents/RESUMO_CONFUCIUS_VS_BRAINSENTRY.md](documents/RESUMO_CONFUCIUS_VS_BRAINSENTRY.md)
+
+## Source code entrypoints
+
+- [brain-sentry-go/cmd/server/main.go](brain-sentry-go/cmd/server/main.go): backend bootstrap
+- [brain-sentry-go/cmd/cli/main.go](brain-sentry-go/cmd/cli/main.go): admin CLI
+- [brain-sentry-go/cmd/tui/main.go](brain-sentry-go/cmd/tui/main.go): Bubble Tea TUI
+- [brain-sentry-frontend/src/App.tsx](brain-sentry-frontend/src/App.tsx): React routes
+- [brain-sentry-frontend/src/components/layout/AdminLayout.tsx](brain-sentry-frontend/src/components/layout/AdminLayout.tsx): grouped sidebar with rail mode
+
+## Test surface
+
+- [brain-sentry-go/internal/](brain-sentry-go/internal/): every package has `_test.go`
+- [brain-sentry-frontend/e2e/tests/](brain-sentry-frontend/e2e/tests/): Playwright specs
+- [brain-sentry-frontend/playwright.config.ts](brain-sentry-frontend/playwright.config.ts): mocked
+- [brain-sentry-frontend/playwright.real.config.ts](brain-sentry-frontend/playwright.real.config.ts): hits real backend
+
+## Optional
+
+- [llms-full.txt](llms-full.txt): same TOC with docs inline (single-fetch convenience)
