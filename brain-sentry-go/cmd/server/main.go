@@ -235,12 +235,58 @@ func main() {
 
 	// ---- P1-P3 New Services ----
 
-	// Fallback Chain LLM Provider
+	// Fallback Chain LLM Provider. Order matters: the first provider with
+	// credentials becomes primary, subsequent ones backstop it when the
+	// primary's circuit opens. Anthropic+Gemini natives skip the OpenRouter
+	// hop (lower latency, prompt caching), so when configured they go first.
 	var llmProvider service.LLMProvider
+	chain := make([]service.LLMProvider, 0, 3)
+	if cfg.Anthropic.APIKey != "" {
+		ac := service.DefaultAnthropicConfig(cfg.Anthropic.APIKey)
+		if cfg.Anthropic.BaseURL != "" {
+			ac.BaseURL = cfg.Anthropic.BaseURL
+		}
+		if cfg.Anthropic.Model != "" {
+			ac.Model = cfg.Anthropic.Model
+		}
+		if cfg.Anthropic.MaxTokens > 0 {
+			ac.MaxTokens = cfg.Anthropic.MaxTokens
+		}
+		if cfg.Anthropic.Temperature != 0 {
+			ac.Temperature = cfg.Anthropic.Temperature
+		}
+		if cfg.Anthropic.Timeout > 0 {
+			ac.Timeout = cfg.Anthropic.Timeout
+		}
+		chain = append(chain, service.NewAnthropicProvider(ac))
+		logger.Info("Anthropic native provider added to chain", "model", ac.Model)
+	}
+	if cfg.Gemini.APIKey != "" {
+		gc := service.DefaultGeminiConfig(cfg.Gemini.APIKey)
+		if cfg.Gemini.BaseURL != "" {
+			gc.BaseURL = cfg.Gemini.BaseURL
+		}
+		if cfg.Gemini.Model != "" {
+			gc.Model = cfg.Gemini.Model
+		}
+		if cfg.Gemini.MaxTokens > 0 {
+			gc.MaxTokens = cfg.Gemini.MaxTokens
+		}
+		if cfg.Gemini.Temperature != 0 {
+			gc.Temperature = cfg.Gemini.Temperature
+		}
+		if cfg.Gemini.Timeout > 0 {
+			gc.Timeout = cfg.Gemini.Timeout
+		}
+		chain = append(chain, service.NewGeminiProvider(gc))
+		logger.Info("Gemini native provider added to chain", "model", gc.Model)
+	}
 	if openRouterService != nil {
-		primary := service.NewOpenRouterProvider(openRouterService)
-		llmProvider = service.NewFallbackChainProvider(primary)
-		logger.Info("LLM fallback chain initialized")
+		chain = append(chain, service.NewOpenRouterProvider(openRouterService))
+	}
+	if len(chain) > 0 {
+		llmProvider = service.NewFallbackChainProvider(chain...)
+		logger.Info("LLM fallback chain initialized", "providers", len(chain))
 	}
 
 	// Memory Compression Pipeline

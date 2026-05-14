@@ -10,6 +10,66 @@ import (
 	"github.com/integraltech/brainsentry/internal/eval/crossmodal"
 )
 
+// --- defaultBuildScorers ---
+
+func TestDefaultBuildScorers_RespectsEnvAndModelFlag(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "sk-or")
+
+	opts := &CrossModalOptions{
+		AnthropicModel:  "claude-3-5-sonnet",
+		GeminiModel:     "", // disabled (no model flag)
+		OpenRouterModel: "openai/gpt-4o-mini",
+	}
+	scorers, err := defaultBuildScorers(opts)()
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if len(scorers) != 2 {
+		t.Errorf("expected 2 scorers (anthropic+openrouter); got %d", len(scorers))
+	}
+	got := map[string]bool{}
+	for _, s := range scorers {
+		got[s.Name()] = true
+	}
+	if !got["anthropic/claude-3-5-sonnet"] || !got["openrouter/openai/gpt-4o-mini"] {
+		t.Errorf("expected anthropic+openrouter in scorer set; got %v", got)
+	}
+}
+
+func TestDefaultBuildScorers_NoKeysReturnsEmpty(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
+	opts := &CrossModalOptions{
+		AnthropicModel:  "claude",
+		GeminiModel:     "gemini",
+		OpenRouterModel: "gpt",
+	}
+	scorers, err := defaultBuildScorers(opts)()
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if len(scorers) != 0 {
+		t.Errorf("expected 0 scorers without keys; got %d", len(scorers))
+	}
+}
+
+func TestDefaultBuildScorers_NoModelFlagsReturnsEmpty(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-a")
+	t.Setenv("GEMINI_API_KEY", "sk-g")
+	t.Setenv("OPENROUTER_API_KEY", "sk-or")
+	opts := &CrossModalOptions{} // all model flags empty
+	scorers, err := defaultBuildScorers(opts)()
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if len(scorers) != 0 {
+		t.Errorf("expected 0 scorers without model flags; got %d", len(scorers))
+	}
+}
+
 func TestReadTextArg_LiteralAndAtFile(t *testing.T) {
 	if got, _ := readTextArg("hello"); got != "hello" {
 		t.Errorf("expected literal pass-through; got %q", got)

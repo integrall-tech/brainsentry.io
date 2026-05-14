@@ -82,8 +82,13 @@
 
 `brain-sentry-go/internal/service/llm_provider.go` + `*_provider.go`
 > Interface `LLMProvider` + impls (`openrouter`, `anthropic`, `gemini`).
-> Wrapped em `FallbackChainProvider` + `CircuitBreaker`. Embedding
-> service tem provider próprio (OpenAI por padrão).
+> Wrapped em `FallbackChainProvider` + `CircuitBreaker`. Ordem da chain
+> é: Anthropic > Gemini > OpenRouter quando todos têm chave configurada
+> (Anthropic/Gemini natives evitam o hop pelo OpenRouter — menor latência
+> + prompt caching). Cada um é opt-in via `anthropic:` / `gemini:` no
+> config.yaml. Embedding service tem provider próprio (OpenAI por padrão).
+> Os mesmos providers viram cross-modal scorers via
+> `internal/eval/crossmodal/wire.Scorers(...)`.
 
 `brain-sentry-go/internal/service/pii.go`
 > 8 tipos de PII detectados; modo MASK (default) substitui por

@@ -17,6 +17,8 @@ type Config struct {
 	Security     SecurityConfig     `yaml:"security"`
 	Tenant       TenantConfig       `yaml:"tenant"`
 	AI           AIConfig           `yaml:"ai"`
+	Anthropic    AnthropicProviderConfig `yaml:"anthropic"`
+	Gemini       GeminiProviderConfig    `yaml:"gemini"`
 	Models       ModelsConfig       `yaml:"models"`
 	Embedding    EmbeddingConfig    `yaml:"embedding"`
 	Interception InterceptionConfig `yaml:"interception"`
@@ -92,6 +94,29 @@ type AIConfig struct {
 	MaxTokens   int           `yaml:"max_tokens"`
 	Timeout     time.Duration `yaml:"timeout"`
 	MaxRetries  int           `yaml:"max_retries"`
+}
+
+// AnthropicProviderConfig holds optional native Anthropic credentials. When
+// APIKey is non-empty the server adds AnthropicProvider to the LLM fallback
+// chain and registers an Anthropic scorer for the cross-modal eval gate.
+type AnthropicProviderConfig struct {
+	APIKey      string        `yaml:"api_key"`
+	BaseURL     string        `yaml:"base_url"`
+	Model       string        `yaml:"model"`
+	MaxTokens   int           `yaml:"max_tokens"`
+	Temperature float64       `yaml:"temperature"`
+	Timeout     time.Duration `yaml:"timeout"`
+}
+
+// GeminiProviderConfig holds optional native Google Gemini credentials. Same
+// opt-in semantics as Anthropic.
+type GeminiProviderConfig struct {
+	APIKey      string        `yaml:"api_key"`
+	BaseURL     string        `yaml:"base_url"`
+	Model       string        `yaml:"model"`
+	MaxTokens   int           `yaml:"max_tokens"`
+	Temperature float64       `yaml:"temperature"`
+	Timeout     time.Duration `yaml:"timeout"`
 }
 
 // ModelsConfig is the operator-facing tier routing config. Optional —

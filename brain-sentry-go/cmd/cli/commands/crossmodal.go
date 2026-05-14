@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/integraltech/brainsentry/internal/eval/crossmodal"
+	"github.com/integraltech/brainsentry/internal/eval/crossmodal/wire"
+	"github.com/integraltech/brainsentry/internal/service"
 	"github.com/spf13/cobra"
 )
 
@@ -22,9 +24,16 @@ type CrossModalOptions struct {
 	JSON        bool
 	Writer      io.Writer
 
+	// Model selection per vendor. Empty disables that vendor; at least 2
+	// vendors must be configured or the gate refuses to run (Aggregate
+	// classifies <2 OK voters as Inconclusive).
+	AnthropicModel string
+	GeminiModel    string
+	OpenRouterModel string
+
 	// Scorer factory — overridable in tests so we don't have to hit live
-	// providers. Production resolves this from runtime config (TODO once
-	// AnthropicProvider/GeminiProvider land in service/).
+	// providers. Production resolves vendors from --anthropic-model /
+	// --gemini-model / --openrouter-model flags + env-var API keys.
 	BuildScorers func() ([]crossmodal.Scorer, error)
 }
 
@@ -56,11 +65,14 @@ human-readable artifact to PRs.`,
 				return fmt.Errorf("read --output: %w", err)
 			}
 			if opts.BuildScorers == nil {
-				return fmt.Errorf("no scorers wired (cross-modal requires Anthropic/OpenAI/Gemini providers — coming with the multi-provider PR)")
+				opts.BuildScorers = defaultBuildScorers(opts)
 			}
 			scorers, err := opts.BuildScorers()
 			if err != nil {
 				return err
+			}
+			if len(scorers) < 2 {
+				return fmt.Errorf("cross-modal requires at least 2 configured vendors (got %d) — set ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY and pass --anthropic-model / --gemini-model / --openrouter-model", len(scorers))
 			}
 			ctx, cancel := context.WithTimeout(c.Context(), 90*time.Second)
 			defer cancel()
@@ -93,9 +105,41 @@ human-readable artifact to PRs.`,
 	cmd.Flags().StringVar(&opts.Slug, "slug", "untitled", "short identifier used in the receipt filename")
 	cmd.Flags().StringVar(&opts.ReceiptsDir, "receipts-dir", "", "where to write the receipt JSON (default ~/.brainsentry/eval-receipts)")
 	cmd.Flags().BoolVar(&opts.JSON, "json", false, "emit JSON result instead of human-readable text")
+	cmd.Flags().StringVar(&opts.AnthropicModel, "anthropic-model", "", "Anthropic model id (uses ANTHROPIC_API_KEY); empty disables")
+	cmd.Flags().StringVar(&opts.GeminiModel, "gemini-model", "", "Gemini model id (uses GEMINI_API_KEY); empty disables")
+	cmd.Flags().StringVar(&opts.OpenRouterModel, "openrouter-model", "", "OpenRouter model id (uses OPENROUTER_API_KEY); empty disables")
 	_ = cmd.MarkFlagRequired("task")
 	_ = cmd.MarkFlagRequired("output")
 	return cmd
+}
+
+// defaultBuildScorers wires Anthropic / Gemini / OpenRouter providers from
+// env-var API keys + --*-model flags. A vendor is included only when BOTH
+// the model flag is non-empty AND its API key env is set; otherwise it
+// quietly drops out of the slate. Aggregate enforces the 2-voter floor.
+func defaultBuildScorers(opts *CrossModalOptions) func() ([]crossmodal.Scorer, error) {
+	return func() ([]crossmodal.Scorer, error) {
+		providers := make([]service.LLMProvider, 0, 3)
+		displayNames := make([]string, 0, 3)
+		if k := os.Getenv("ANTHROPIC_API_KEY"); k != "" && opts.AnthropicModel != "" {
+			cfg := service.DefaultAnthropicConfig(k)
+			cfg.Model = opts.AnthropicModel
+			providers = append(providers, service.NewAnthropicProvider(cfg))
+			displayNames = append(displayNames, "anthropic/"+opts.AnthropicModel)
+		}
+		if k := os.Getenv("GEMINI_API_KEY"); k != "" && opts.GeminiModel != "" {
+			cfg := service.DefaultGeminiConfig(k)
+			cfg.Model = opts.GeminiModel
+			providers = append(providers, service.NewGeminiProvider(cfg))
+			displayNames = append(displayNames, "google/"+opts.GeminiModel)
+		}
+		if k := os.Getenv("OPENROUTER_API_KEY"); k != "" && opts.OpenRouterModel != "" {
+			or := service.NewOpenRouterService(k, "", opts.OpenRouterModel, 0.7, 4096, 60*time.Second, 0)
+			providers = append(providers, service.NewOpenRouterProvider(or))
+			displayNames = append(displayNames, "openrouter/"+opts.OpenRouterModel)
+		}
+		return wire.Scorers(providers, displayNames), nil
+	}
 }
 
 // readTextArg accepts either a literal string or "@path/to/file" pointing
