@@ -1130,6 +1130,53 @@ export const helpContent: Record<string, HelpEntry> = {
     ),
   },
 
+  "/app/diagnostics": {
+    ptBR: pt(
+      "Diagnóstico do Sistema",
+      "Tudo está funcionando?",
+      "Saber, em segundos, se algum componente do sistema está degradado ou fora do ar — antes que o usuário final note.",
+      "Quando uma busca demora muito, um login falha ou um agente não responde, você precisa de uma resposta rápida: é a base de dados, o cache, o provedor de IA, a rede? Esta tela checa todos os componentes e aponta exatamente o que está estranho.",
+      [
+        "Cada componente externo (banco, cache, grafo, IA) é testado em paralelo",
+        "Cada check leva até alguns segundos e mostra latência, mensagem e dica",
+        "O resultado agregado vira uma cor: verde, amarelo (atenção) ou vermelho (falha)",
+        "É um espelho do comando 'brainsentry doctor' do terminal — mesmo motor, mesmo critério",
+      ],
+      [
+        { numero: 1, acao: "Abra esta tela quando algo parecer fora do ar", esperado: "Carrega o relatório atual em poucos segundos" },
+        { numero: 2, acao: "Procure linhas em vermelho ou amarelo", esperado: "Cada uma traz um detalhe e uma dica de ação" },
+        { numero: 3, acao: "Clique em 'Rodar novamente' depois de aplicar correções", esperado: "Status muda para verde se o problema foi resolvido" },
+      ],
+      [
+        "Vermelho não é alarme falso — costuma indicar perda real de funcionalidade",
+        "Amarelo costuma ser tolerável (cache ausente, por exemplo) mas vale investigar",
+        "Use junto com seus dashboards de monitoramento, não no lugar deles",
+      ],
+    ),
+    en: pt(
+      "System Diagnostics",
+      "Is everything actually working?",
+      "Know in seconds whether any system component is degraded or down — before the end user notices.",
+      "When a search lags, a login fails or an agent stops responding, you need a quick answer: is it the database, the cache, the AI provider, the network? This screen probes all components and points to exactly what is off.",
+      [
+        "Each external dependency (DB, cache, graph, AI) is tested in parallel",
+        "Each check shows latency, message and a hint",
+        "Aggregate result is a color: green, amber (warning), red (failure)",
+        "Mirror of the 'brainsentry doctor' CLI — same engine, same criteria",
+      ],
+      [
+        { numero: 1, acao: "Open this screen when something feels off", esperado: "Loads the current report in seconds" },
+        { numero: 2, acao: "Look for red or amber rows", esperado: "Each carries a detail and an action hint" },
+        { numero: 3, acao: "Click 'Run again' after applying fixes", esperado: "Turns green when resolved" },
+      ],
+      [
+        "Red is rarely a false alarm — usually a real loss of functionality",
+        "Amber is often tolerable (missing cache, for example) but worth checking",
+        "Pair with your monitoring dashboards, not as a replacement",
+      ],
+    ),
+  },
+
   "/app/analytics": {
     ptBR: pt(
       "Analytics",

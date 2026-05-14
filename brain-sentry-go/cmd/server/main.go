@@ -15,6 +15,7 @@ import (
 
 	"github.com/integraltech/brainsentry/internal/cache"
 	"github.com/integraltech/brainsentry/internal/config"
+	"github.com/integraltech/brainsentry/internal/diagnostics"
 	"github.com/integraltech/brainsentry/internal/handler"
 	"github.com/integraltech/brainsentry/internal/mcp"
 	"github.com/integraltech/brainsentry/internal/middleware"
@@ -526,6 +527,59 @@ func main() {
 		graphViewHandler = handler.NewGraphViewHandler(memoryRepo, graphClient, graphRAGRepo, louvainService)
 	}
 
+	// Diagnostics ("doctor") — TCP probes for every external dependency the
+	// running server can reach, plus a Postgres ping closure so the operator
+	// learns immediately if connectivity has degraded.
+	diagCheckers := []diagnostics.Checker{
+		&diagnostics.TCPChecker{
+			CheckName: "postgres",
+			Sev:       diagnostics.SeverityCritical,
+			Host:      cfg.Database.Host,
+			Port:      cfg.Database.Port,
+			Hint:      "verify docker compose ps and credentials",
+		},
+		&diagnostics.TCPChecker{
+			CheckName: "falkordb",
+			Sev:       diagnostics.SeverityWarning,
+			Host:      cfg.FalkorDB.Host,
+			Port:      cfg.FalkorDB.Port,
+			Hint:      "graph features disabled until reachable",
+		},
+		&diagnostics.TCPChecker{
+			CheckName: "redis",
+			Sev:       diagnostics.SeverityWarning,
+			Host:      cfg.Redis.Host,
+			Port:      cfg.Redis.Port,
+			Hint:      "rate-limit + caching degraded without redis",
+		},
+		&diagnostics.FuncChecker{
+			CheckName: "postgres-ping",
+			Fn: func(ctx context.Context) diagnostics.CheckResult {
+				if err := pool.Ping(ctx); err != nil {
+					return diagnostics.CheckResult{
+						Status: diagnostics.StatusFail, Severity: diagnostics.SeverityCritical,
+						Message: "ping failed", Detail: err.Error(),
+					}
+				}
+				return diagnostics.CheckResult{
+					Status: diagnostics.StatusOK, Severity: diagnostics.SeverityCritical,
+					Message: "round-trip ok",
+				}
+			},
+		},
+	}
+	if cfg.AI.APIKey != "" && cfg.AI.BaseURL != "" {
+		diagCheckers = append(diagCheckers, &diagnostics.HTTPChecker{
+			CheckName: "openrouter",
+			Sev:       diagnostics.SeverityWarning,
+			URL:       cfg.AI.BaseURL,
+			Method:    "GET",
+			Hint:      "verify OPENROUTER_API_KEY and account funding",
+		})
+	}
+	doctor := diagnostics.New(diagCheckers, 4*time.Second)
+	diagnosticsHandler := handler.NewDiagnosticsHandler(doctor)
+
 	var activationHandler *handler.ActivationHandler
 	if spreadingActivationService != nil {
 		activationHandler = handler.NewActivationHandler(spreadingActivationService)
@@ -601,6 +655,7 @@ func main() {
 	publicPaths := []string{
 		cfg.Server.ContextPath + "/v1/auth/",
 		cfg.Server.ContextPath + "/health",
+		cfg.Server.ContextPath + "/v1/diagnostics",
 		"/health",
 		"/metrics",
 		"/swagger.json",
@@ -615,6 +670,9 @@ func main() {
 	r.Route(cfg.Server.ContextPath, func(r chi.Router) {
 		// Health
 		r.Get("/health", handler.Health)
+
+		// Diagnostics ("doctor") — same engine as the brainsentry CLI.
+		r.Get("/v1/diagnostics", diagnosticsHandler.Get)
 
 		// Auth
 		r.Route("/v1/auth", func(r chi.Router) {

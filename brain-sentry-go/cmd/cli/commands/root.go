@@ -29,6 +29,7 @@ func init() {
 		newCorrectCmd(app),
 		newReviewCmd(app),
 		newImportCmd(app),
+		newDoctorCmd(app),
 	)
 }
 

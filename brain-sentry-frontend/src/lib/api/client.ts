@@ -1086,10 +1086,39 @@ class ApiClient {
     return data;
   }
 
+  // -------- Diagnostics ("doctor") --------
+  async getDiagnostics(): Promise<DiagnosticsReport> {
+    const { data } = await this.client.get("/v1/diagnostics");
+    return data;
+  }
+
   // Getter para o cliente axios bruto (para casos específicos)
   get axiosInstance(): AxiosInstance {
     return this.client;
   }
+}
+
+// -------- Diagnostics DTOs --------
+
+export type DiagnosticsStatus = "ok" | "warn" | "fail" | "skip";
+export type DiagnosticsSeverity = "info" | "warning" | "critical";
+
+export interface DiagnosticsCheck {
+  name: string;
+  status: DiagnosticsStatus;
+  severity: DiagnosticsSeverity;
+  message: string;
+  detail?: string;
+  hint?: string;
+  duration_ms: number;
+}
+
+export interface DiagnosticsReport {
+  status: DiagnosticsStatus;
+  generated_at: string;
+  duration_ms: number;
+  checks: DiagnosticsCheck[];
+  summary: { ok: number; warn: number; fail: number; skip: number };
 }
 
 // -------- Semantica DTOs --------

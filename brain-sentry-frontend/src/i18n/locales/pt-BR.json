@@ -87,6 +87,7 @@
     "graphGlobal": "Grafo Global",
     "graphEgo": "Ego-grafo",
     "graphTimeline": "Grafo Temporal",
+    "diagnostics": "Diagnóstico",
     "group": {
       "knowledge": "Conhecimento",
       "graphs": "Grafos",
@@ -113,6 +114,24 @@
       "regras": "Regras-chave"
     },
     "footer": "Guia escrito em linguagem simples para apoiar o uso diário da tela."
+  },
+  "diagnostics": {
+    "title": "Diagnóstico do Sistema",
+    "subtitle": "Verificação automática de cada dependência (banco, grafo, cache, provedor de LLM). Use este painel quando algo parecer fora do ar para descobrir rapidamente o que está degradado.",
+    "refresh": "Rodar novamente",
+    "empty": "Nenhum check configurado.",
+    "status": {
+      "ok": "Tudo certo",
+      "warn": "Atenção",
+      "fail": "Falha detectada",
+      "skip": "Não verificado"
+    },
+    "summary": {
+      "ok": "OK",
+      "warn": "Alerta",
+      "fail": "Falha",
+      "skip": "Pulado"
+    }
   },
   "graphGlobal": {
     "title": "Grafo Global",

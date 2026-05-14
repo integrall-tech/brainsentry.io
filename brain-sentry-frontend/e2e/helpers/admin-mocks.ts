@@ -1229,6 +1229,22 @@ export async function mockAdminApis(page: Page) {
       });
     }
 
+    if (path === "/v1/diagnostics" && method === "GET") {
+      return json(route, {
+        status: "warn",
+        generated_at: "2026-05-13T12:00:00.000Z",
+        duration_ms: 124,
+        checks: [
+          { name: "postgres", status: "ok", severity: "critical", message: "reachable at 127.0.0.1:5432", duration_ms: 12 },
+          { name: "postgres-ping", status: "ok", severity: "critical", message: "round-trip ok", duration_ms: 8 },
+          { name: "redis", status: "warn", severity: "warning", message: "TCP dial failed", detail: "127.0.0.1:6379: connection refused", hint: "rate-limit + caching degraded without redis", duration_ms: 24 },
+          { name: "falkordb", status: "ok", severity: "warning", message: "reachable at 127.0.0.1:6380", duration_ms: 14 },
+          { name: "openrouter", status: "ok", severity: "warning", message: "HTTP 200", duration_ms: 64 },
+        ],
+        summary: { ok: 4, warn: 1, fail: 0, skip: 0 },
+      });
+    }
+
     if (path === "/v1/graph/timeline" && method === "GET") {
       const nodes = [
         {
