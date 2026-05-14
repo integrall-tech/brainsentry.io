@@ -46,6 +46,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Stethoscope,
+  Cpu,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -241,6 +242,7 @@ export function AdminLayout() {
           { kind: "item", id: "tenants", title: t("nav.tenants"), href: "/app/tenants", icon: Building2 },
           { kind: "item", id: "configuration", title: t("nav.configuration"), href: "/app/configuration", icon: SlidersHorizontal },
           { kind: "item", id: "diagnostics", title: t("nav.diagnostics"), href: "/app/diagnostics", icon: Stethoscope },
+          { kind: "item", id: "models", title: t("nav.models"), href: "/app/models", icon: Cpu },
           { kind: "item", id: "profile", title: t("nav.profile"), href: "/app/profile", icon: User },
         ],
       },

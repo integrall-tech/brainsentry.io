@@ -1092,6 +1092,17 @@ class ApiClient {
     return data;
   }
 
+  // -------- Models (tier routing) --------
+  async getModelsSnapshot(): Promise<{ snapshot: ModelResolveResult[] }> {
+    const { data } = await this.client.get("/v1/models");
+    return data;
+  }
+
+  async getModelsDoctor(): Promise<ModelsDoctorReport> {
+    const { data } = await this.client.get("/v1/models/doctor");
+    return data;
+  }
+
   // Getter para o cliente axios bruto (para casos específicos)
   get axiosInstance(): AxiosInstance {
     return this.client;
@@ -1119,6 +1130,42 @@ export interface DiagnosticsReport {
   duration_ms: number;
   checks: DiagnosticsCheck[];
   summary: { ok: number; warn: number; fail: number; skip: number };
+}
+
+// -------- Models (tier routing) DTOs --------
+
+export type ModelTier = "utility" | "reasoning" | "deep" | "subagent";
+export type ModelFailureKind =
+  | ""
+  | "model_not_found"
+  | "auth"
+  | "rate_limit"
+  | "network"
+  | "timeout"
+  | "invalid_request"
+  | "unknown";
+
+export interface ModelResolveResult {
+  tier: ModelTier;
+  model: string;
+  source: string;
+}
+
+export interface ModelProbeResult {
+  tier: ModelTier;
+  model: string;
+  ok: boolean;
+  failure?: ModelFailureKind;
+  duration_ms: number;
+  detail?: string;
+  hint?: string;
+}
+
+export interface ModelsDoctorReport {
+  generated_at: string;
+  duration_ms: number;
+  ok: boolean;
+  results: ModelProbeResult[];
 }
 
 // -------- Semantica DTOs --------

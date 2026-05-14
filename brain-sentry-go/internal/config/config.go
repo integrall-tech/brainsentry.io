@@ -17,6 +17,7 @@ type Config struct {
 	Security     SecurityConfig     `yaml:"security"`
 	Tenant       TenantConfig       `yaml:"tenant"`
 	AI           AIConfig           `yaml:"ai"`
+	Models       ModelsConfig       `yaml:"models"`
 	Embedding    EmbeddingConfig    `yaml:"embedding"`
 	Interception InterceptionConfig `yaml:"interception"`
 	Memory       MemoryConfig       `yaml:"memory"`
@@ -91,6 +92,14 @@ type AIConfig struct {
 	MaxTokens   int           `yaml:"max_tokens"`
 	Timeout     time.Duration `yaml:"timeout"`
 	MaxRetries  int           `yaml:"max_retries"`
+}
+
+// ModelsConfig is the operator-facing tier routing config. Optional —
+// resolution falls back to AI.Model and built-in tier defaults when unset.
+// See internal/models/tiers.go for the full resolution chain.
+type ModelsConfig struct {
+	Default string            `yaml:"default"`
+	Tier    map[string]string `yaml:"tier"`
 }
 
 type EmbeddingConfig struct {

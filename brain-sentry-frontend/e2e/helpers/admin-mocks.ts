@@ -1229,6 +1229,32 @@ export async function mockAdminApis(page: Page) {
       });
     }
 
+    if (path === "/v1/models" && method === "GET") {
+      return json(route, {
+        snapshot: [
+          { tier: "utility",   model: "openai/gpt-4o-mini",         source: "config-tier" },
+          { tier: "reasoning", model: "anthropic/claude-3-5-sonnet", source: "config-tier" },
+          { tier: "deep",      model: "anthropic/claude-opus-4",     source: "config-default" },
+          { tier: "subagent",  model: "anthropic/claude-3-5-sonnet", source: "tier-default" },
+        ],
+      });
+    }
+
+    if (path === "/v1/models/doctor" && method === "GET") {
+      return json(route, {
+        generated_at: "2026-05-13T12:00:00.000Z",
+        duration_ms: 412,
+        ok: false,
+        results: [
+          { tier: "utility",   model: "openai/gpt-4o-mini",         ok: true,  duration_ms: 110 },
+          { tier: "reasoning", model: "anthropic/claude-3-5-sonnet", ok: true,  duration_ms: 132 },
+          { tier: "deep",      model: "anthropic/claude-opus-4",     ok: true,  duration_ms: 145 },
+          { tier: "subagent",  model: "phantom/model-x",             ok: false, failure: "model_not_found", duration_ms: 25,
+            detail: "HTTP 404", hint: "the model id does not exist on the provider — check for typos / phantom IDs" },
+        ],
+      });
+    }
+
     if (path === "/v1/diagnostics" && method === "GET") {
       return json(route, {
         status: "warn",

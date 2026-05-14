@@ -17,6 +17,7 @@ import (
 	"github.com/integraltech/brainsentry/internal/config"
 	"github.com/integraltech/brainsentry/internal/diagnostics"
 	"github.com/integraltech/brainsentry/internal/handler"
+	modelsrouting "github.com/integraltech/brainsentry/internal/models"
 	"github.com/integraltech/brainsentry/internal/mcp"
 	"github.com/integraltech/brainsentry/internal/middleware"
 	graphrepo "github.com/integraltech/brainsentry/internal/repository/graph"
@@ -580,6 +581,20 @@ func main() {
 	doctor := diagnostics.New(diagCheckers, 4*time.Second)
 	diagnosticsHandler := handler.NewDiagnosticsHandler(doctor)
 
+	// Tier-based model routing — operators set per-tier overrides under
+	// `models:` in config.yaml; resolution falls back to AI.Model and the
+	// built-in TierDefaults so existing configs keep working.
+	modelsCfg := modelsrouting.FromYAML(cfg.Models.Default, cfg.Models.Tier, cfg.AI.Model)
+	var modelsProber modelsrouting.Prober
+	if cfg.AI.APIKey != "" && cfg.AI.BaseURL != "" {
+		modelsProber = &modelsrouting.HTTPProber{
+			BaseURL: cfg.AI.BaseURL,
+			APIKey:  cfg.AI.APIKey,
+			Client:  &http.Client{Timeout: 10 * time.Second},
+		}
+	}
+	modelsHandler := handler.NewModelsHandler(modelsCfg, modelsProber)
+
 	var activationHandler *handler.ActivationHandler
 	if spreadingActivationService != nil {
 		activationHandler = handler.NewActivationHandler(spreadingActivationService)
@@ -656,6 +671,7 @@ func main() {
 		cfg.Server.ContextPath + "/v1/auth/",
 		cfg.Server.ContextPath + "/health",
 		cfg.Server.ContextPath + "/v1/diagnostics",
+		cfg.Server.ContextPath + "/v1/models",
 		"/health",
 		"/metrics",
 		"/swagger.json",
@@ -673,6 +689,10 @@ func main() {
 
 		// Diagnostics ("doctor") — same engine as the brainsentry CLI.
 		r.Get("/v1/diagnostics", diagnosticsHandler.Get)
+
+		// Tier-based model routing
+		r.Get("/v1/models", modelsHandler.List)
+		r.Get("/v1/models/doctor", modelsHandler.Doctor)
 
 		// Auth
 		r.Route("/v1/auth", func(r chi.Router) {

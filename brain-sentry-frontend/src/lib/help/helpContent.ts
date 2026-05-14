@@ -1177,6 +1177,53 @@ export const helpContent: Record<string, HelpEntry> = {
     ),
   },
 
+  "/app/models": {
+    ptBR: pt(
+      "Roteamento de Modelos",
+      "Qual IA está sendo usada para o quê",
+      "Cada tipo de tarefa precisa de um modelo diferente. Tarefas curtas pedem rapidez; análises profundas pedem capacidade. Aqui você vê e ajusta essa escolha.",
+      "Sem essa visibilidade, é fácil pagar caro por tarefas simples ou usar modelo barato em decisões importantes — duas formas diferentes de errar.",
+      [
+        "4 camadas: utilitário (rápido), raciocínio (cuidadoso), profundo (longo contexto), sub-agente (usa ferramentas)",
+        "Origem da escolha mostra de onde veio o modelo (config, env, padrão)",
+        "O botão 'Testar provedores' faz uma chamada de 1 token em cada modelo configurado",
+        "Falhas são classificadas (modelo não existe, autenticação, limite de uso, rede, tempo esgotado) com dica de ação",
+      ],
+      [
+        { numero: 1, acao: "Veja a tabela de roteamento atual", esperado: "Cada camada mostra modelo + origem da escolha" },
+        { numero: 2, acao: "Clique 'Testar provedores'", esperado: "Cada camada vira PASS verde ou FAIL vermelho com motivo" },
+        { numero: 3, acao: "Se algo falhar, leia a dica e ajuste config.yaml ou env vars", esperado: "Após nova tentativa, status muda para verde" },
+      ],
+      [
+        "Modelo 'fantasma' (ID errado) costuma virar falha 'modelo não existe' — confira espaço, hífen e versão",
+        "Falha de autenticação = chave inválida ou conta sem acesso àquele modelo",
+        "Limite de uso costuma resolver sozinho em alguns minutos; rede e DNS exigem investigação",
+      ],
+    ),
+    en: pt(
+      "Model Routing",
+      "Which AI is used for what",
+      "Each task type needs a different model. Short tasks want speed; deep analyses want capacity. Here you see and tune that choice.",
+      "Without this visibility, it is easy to overpay for simple tasks or use a cheap model on important decisions — two different ways to be wrong.",
+      [
+        "4 tiers: utility (fast), reasoning (careful), deep (long context), sub-agent (uses tools)",
+        "Source shows where the model came from (config, env, default)",
+        "'Probe providers' fires a 1-token call against each configured model",
+        "Failures are classified (model not found, auth, rate limit, network, timeout) with an action hint",
+      ],
+      [
+        { numero: 1, acao: "Look at the current routing table", esperado: "Each tier shows model + source" },
+        { numero: 2, acao: "Click 'Probe providers'", esperado: "Each tier turns green PASS or red FAIL with reason" },
+        { numero: 3, acao: "On failure, read the hint and adjust config.yaml or env vars", esperado: "After re-probe the row turns green" },
+      ],
+      [
+        "A 'phantom' model id often shows up as model_not_found — check spaces, hyphens and version",
+        "Auth failure = invalid key or account without access to that model",
+        "Rate limit usually resolves in minutes; network/DNS need investigation",
+      ],
+    ),
+  },
+
   "/app/analytics": {
     ptBR: pt(
       "Analytics",

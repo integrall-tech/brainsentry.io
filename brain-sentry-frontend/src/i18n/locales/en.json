@@ -88,6 +88,7 @@
     "graphEgo": "Ego Graph",
     "graphTimeline": "Timeline Graph",
     "diagnostics": "Diagnostics",
+    "models": "Models",
     "group": {
       "knowledge": "Knowledge",
       "graphs": "Graphs",
@@ -131,6 +132,23 @@
       "warn": "Warn",
       "fail": "Fail",
       "skip": "Skip"
+    }
+  },
+  "models": {
+    "title": "Model Routing",
+    "subtitle": "Each task class (utility, reasoning, deep, sub-agent) uses a different model — see which is in use and probe whether each one actually responds.",
+    "refresh": "Refresh",
+    "runDoctor": "Probe providers",
+    "routing": "Current routing",
+    "unresolved": "no model configured",
+    "col": {
+      "tier": "Tier",
+      "model": "Model",
+      "source": "Where it came from"
+    },
+    "doctor": {
+      "allPass": "All providers responded",
+      "someFail": "Some provider failed — see details below"
     }
   },
   "graphGlobal": {

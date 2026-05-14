@@ -88,6 +88,7 @@
     "graphEgo": "Ego-grafo",
     "graphTimeline": "Grafo Temporal",
     "diagnostics": "Diagnóstico",
+    "models": "Modelos",
     "group": {
       "knowledge": "Conhecimento",
       "graphs": "Grafos",
@@ -131,6 +132,23 @@
       "warn": "Alerta",
       "fail": "Falha",
       "skip": "Pulado"
+    }
+  },
+  "models": {
+    "title": "Roteamento de Modelos",
+    "subtitle": "Cada classe de tarefa (utilitário, raciocínio, profundo, sub-agente) usa um modelo diferente — aqui você vê qual está em uso e testa se cada um responde de fato.",
+    "refresh": "Atualizar",
+    "runDoctor": "Testar provedores",
+    "routing": "Roteamento atual",
+    "unresolved": "sem modelo configurado",
+    "col": {
+      "tier": "Camada",
+      "model": "Modelo",
+      "source": "Origem da escolha"
+    },
+    "doctor": {
+      "allPass": "Todos os provedores responderam",
+      "someFail": "Algum provedor falhou — veja detalhes abaixo"
     }
   },
   "graphGlobal": {

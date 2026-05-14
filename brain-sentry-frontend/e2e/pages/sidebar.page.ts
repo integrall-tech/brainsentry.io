@@ -29,6 +29,7 @@ export class Sidebar {
     "Tenants",
     "Configurações",
     "Diagnóstico",
+    "Modelos",
     "Analytics",
     "Perfil",
     "Playground",
