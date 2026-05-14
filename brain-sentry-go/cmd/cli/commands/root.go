@@ -33,6 +33,7 @@ func init() {
 		newModelsCmd(app),
 		newEvalCmd(app),
 		newInitCmd(app),
+		newRebuildCmd(app),
 	)
 }
 
