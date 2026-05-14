@@ -581,6 +581,8 @@ func main() {
 	doctor := diagnostics.New(diagCheckers, 4*time.Second)
 	diagnosticsHandler := handler.NewDiagnosticsHandler(doctor)
 
+	adminTrustHandler := handler.NewAdminTrustHandler(redisCache)
+
 	// Tier-based model routing — operators set per-tier overrides under
 	// `models:` in config.yaml; resolution falls back to AI.Model and the
 	// built-in TierDefaults so existing configs keep working.
@@ -665,6 +667,7 @@ func main() {
 	r.Use(middleware.RequestLogger(logger))
 	r.Use(middleware.CORS(cfg.Security.CORS.AllowedOrigins, cfg.Security.CORS.AllowedMethods))
 	r.Use(middleware.RateLimit(rateLimiter))
+	r.Use(middleware.TrustRemote) // tag every HTTP request as untrusted-by-default
 
 	// Public paths (no auth required)
 	publicPaths := []string{
@@ -693,6 +696,9 @@ func main() {
 		// Tier-based model routing
 		r.Get("/v1/models", modelsHandler.List)
 		r.Get("/v1/models/doctor", modelsHandler.Doctor)
+
+		// Operator-only destructive endpoints (CLI-only by trust contract)
+		r.Post("/v1/admin/wipe-embedding-cache", middleware.RequireLocalTrust(adminTrustHandler.WipeEmbeddingCache))
 
 		// Auth
 		r.Route("/v1/auth", func(r chi.Router) {
