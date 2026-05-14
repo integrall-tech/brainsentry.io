@@ -10,18 +10,29 @@ import (
 
 	"github.com/integraltech/brainsentry/internal/domain"
 	"github.com/integraltech/brainsentry/internal/dto"
+	"github.com/integraltech/brainsentry/internal/eval"
 	"github.com/integraltech/brainsentry/internal/service"
+	"github.com/integraltech/brainsentry/pkg/tenant"
 )
 
 // MemoryHandler handles memory endpoints.
 type MemoryHandler struct {
 	memoryService       *service.MemoryService
 	relationshipService *service.RelationshipService
+	evalStore           *eval.Store
 }
 
 // NewMemoryHandler creates a new MemoryHandler.
 func NewMemoryHandler(memoryService *service.MemoryService, relationshipService *service.RelationshipService) *MemoryHandler {
 	return &MemoryHandler{memoryService: memoryService, relationshipService: relationshipService}
+}
+
+// WithEvalCapture attaches the eval candidate store. When the env flag
+// BRAINSENTRY_EVAL_CAPTURE=1 is set, every search call will record the
+// query + top-N results into the store for later export/replay.
+func (h *MemoryHandler) WithEvalCapture(store *eval.Store) *MemoryHandler {
+	h.evalStore = store
+	return h
 }
 
 // Create handles POST /v1/memories
@@ -222,10 +233,30 @@ func (h *MemoryHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	start := time.Now()
 	searchResp, err := h.memoryService.SearchMemories(r.Context(), req)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "search failed")
 		return
+	}
+
+	if h.evalStore != nil && eval.CaptureEnabled() {
+		ids := make([]string, 0, len(searchResp.Results))
+		for _, r := range searchResp.Results {
+			ids = append(ids, r.ID)
+		}
+		k := req.Limit
+		if k <= 0 {
+			k = len(ids)
+		}
+		h.evalStore.Add(eval.Candidate{
+			TenantID:  tenant.FromContext(r.Context()),
+			Query:     req.Query,
+			K:         k,
+			TopIDs:    ids,
+			LatencyMs: time.Since(start).Milliseconds(),
+			Strategy:  "search",
+		})
 	}
 
 	writeJSON(w, http.StatusOK, searchResp)

@@ -31,6 +31,7 @@ func init() {
 		newImportCmd(app),
 		newDoctorCmd(app),
 		newModelsCmd(app),
+		newEvalCmd(app),
 	)
 }
 

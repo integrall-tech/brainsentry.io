@@ -16,6 +16,7 @@ import (
 	"github.com/integraltech/brainsentry/internal/cache"
 	"github.com/integraltech/brainsentry/internal/config"
 	"github.com/integraltech/brainsentry/internal/diagnostics"
+	"github.com/integraltech/brainsentry/internal/eval"
 	"github.com/integraltech/brainsentry/internal/handler"
 	modelsrouting "github.com/integraltech/brainsentry/internal/models"
 	"github.com/integraltech/brainsentry/internal/mcp"
@@ -583,6 +584,13 @@ func main() {
 
 	adminTrustHandler := handler.NewAdminTrustHandler(redisCache)
 
+	// Eval candidates store — opt-in capture via BRAINSENTRY_EVAL_CAPTURE=1.
+	// Ring-buffer at 5000 keeps memory bounded if the operator forgets to
+	// drain. Resets after every successful export.
+	evalStore := eval.NewStore(5000)
+	evalHandler := handler.NewEvalHandler(evalStore)
+	memoryHandler.WithEvalCapture(evalStore)
+
 	// Tier-based model routing — operators set per-tier overrides under
 	// `models:` in config.yaml; resolution falls back to AI.Model and the
 	// built-in TierDefaults so existing configs keep working.
@@ -699,6 +707,11 @@ func main() {
 
 		// Operator-only destructive endpoints (CLI-only by trust contract)
 		r.Post("/v1/admin/wipe-embedding-cache", middleware.RequireLocalTrust(adminTrustHandler.WipeEmbeddingCache))
+
+		// Eval capture/export (opt-in via BRAINSENTRY_EVAL_CAPTURE=1)
+		r.Get("/v1/eval/candidates.ndjson", evalHandler.Export)
+		r.Get("/v1/eval/candidates/stats", evalHandler.Stats)
+		r.Post("/v1/eval/candidates/reset", evalHandler.Reset)
 
 		// Auth
 		r.Route("/v1/auth", func(r chi.Router) {
