@@ -27,6 +27,7 @@ import (
 	graphrepo "github.com/integraltech/brainsentry/internal/repository/graph"
 	"github.com/integraltech/brainsentry/internal/repository/postgres"
 	"github.com/integraltech/brainsentry/internal/service"
+	"github.com/integraltech/brainsentry/internal/store"
 	"github.com/integraltech/brainsentry/pkg/lazy"
 	"github.com/integraltech/brainsentry/pkg/trust"
 )
@@ -649,6 +650,36 @@ func main() {
 	evalHandler := handler.NewEvalHandler(evalStore)
 	memoryHandler.WithEvalCapture(evalStore)
 
+	// Pluggable MemoryStore — proves the abstraction works end-to-end.
+	// Default backend is the existing Postgres repo wrapped as a
+	// PostgresStore (no behavior change for current deployments).
+	// Setting `store.backend: embedded` in config.yaml swaps in the
+	// JSON-file EmbeddedStore for the /v1/store/memories surface, so
+	// `brainsentry init --embedded` workspaces serve a working API
+	// without Postgres for those routes.
+	var memoryStore store.MemoryStore
+	switch cfg.Store.Backend {
+	case "embedded":
+		path := cfg.Store.Embedded.Path
+		if path == "" {
+			path = "./brain.db.json"
+		}
+		es, err := store.OpenEmbedded(path)
+		if err != nil {
+			logger.Error("embedded store init failed; /v1/store/memories disabled", "error", err)
+		} else {
+			memoryStore = es
+			logger.Info("MemoryStore: embedded backend ready", "path", path)
+		}
+	default:
+		memoryStore = store.NewPostgresStore(memoryRepo)
+		logger.Info("MemoryStore: postgres backend ready")
+	}
+	var storeMemoryHandler *handler.StoreMemoryHandler
+	if memoryStore != nil {
+		storeMemoryHandler = handler.NewStoreMemoryHandler(memoryStore)
+	}
+
 	// Tier-based model routing — operators set per-tier overrides under
 	// `models:` in config.yaml; resolution falls back to AI.Model and the
 	// built-in TierDefaults so existing configs keep working.
@@ -798,6 +829,18 @@ func main() {
 		r.Get("/v1/eval/candidates.ndjson", evalHandler.Export)
 		r.Get("/v1/eval/candidates/stats", evalHandler.Stats)
 		r.Post("/v1/eval/candidates/reset", evalHandler.Reset)
+
+		// Pluggable MemoryStore surface — same handler, postgres or
+		// embedded under the hood (see store.backend in config.yaml).
+		if storeMemoryHandler != nil {
+			r.Route("/v1/store/memories", func(r chi.Router) {
+				r.Get("/", storeMemoryHandler.List)
+				r.Post("/", storeMemoryHandler.Create)
+				r.Get("/search", storeMemoryHandler.Search)
+				r.Get("/{id}", storeMemoryHandler.Get)
+				r.Delete("/{id}", storeMemoryHandler.Delete)
+			})
+		}
 
 		// Auth
 		r.Route("/v1/auth", func(r chi.Router) {

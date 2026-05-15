@@ -107,6 +107,16 @@
 > `FindByRecordedRange`, `IncrementInjectionCount`. Usa pgvector pra
 > embeddings (cosine). Schema fica em `cmd/server/migrations/`.
 
+`brain-sentry-go/internal/store/`
+> Interface `MemoryStore` (Create/Get/List/Search/Delete/Close) com 2
+> impls — `PostgresStore` (envolve a `MemoryRepository` acima) e
+> `EmbeddedStore` (JSON file, zero-deps, pra `init --embedded`).
+> Mountada em `/v1/store/memories` via `handler.StoreMemoryHandler`.
+> Backend escolhido por `store.backend` no config.yaml. **Não substitui**
+> a `MemoryRepository` no caminho principal — é surface complementar
+> que prova a abstração e habilita o modo embedded para CRUD básico.
+> Boot do server ainda exige Postgres (services-side).
+
 `brain-sentry-go/internal/repository/graph/`
 > `MemoryGraphRepository` (CRUD em FalkorDB) + `GraphRAGRepository`
 > (multi-hop search, EnrichContext). Cypher fica inline (não temos

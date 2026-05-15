@@ -20,6 +20,7 @@ type Config struct {
 	Anthropic    AnthropicProviderConfig `yaml:"anthropic"`
 	Gemini       GeminiProviderConfig    `yaml:"gemini"`
 	Models       ModelsConfig       `yaml:"models"`
+	Store        StoreConfig        `yaml:"store"`
 	Embedding    EmbeddingConfig    `yaml:"embedding"`
 	Interception InterceptionConfig `yaml:"interception"`
 	Memory       MemoryConfig       `yaml:"memory"`
@@ -125,6 +126,25 @@ type GeminiProviderConfig struct {
 type ModelsConfig struct {
 	Default string            `yaml:"default"`
 	Tier    map[string]string `yaml:"tier"`
+}
+
+// StoreConfig selects the backend behind the small store.MemoryStore
+// surface (mounted at /v1/store/memories). The full production memory
+// pipeline always uses Postgres; this knob exists so the zero-config
+// embedded mode (`brainsentry init --embedded`) can serve a working API
+// without Postgres at all.
+//
+// backend = "" or "postgres" → store.PostgresStore wraps the existing repo
+// backend = "embedded"        → store.EmbeddedStore at Embedded.Path
+type StoreConfig struct {
+	Backend  string             `yaml:"backend"`
+	Embedded EmbeddedStoreConfig `yaml:"embedded"`
+}
+
+// EmbeddedStoreConfig points the embedded backend at a JSON file. Created
+// on first write; safe to point at a non-existent path.
+type EmbeddedStoreConfig struct {
+	Path string `yaml:"path"`
 }
 
 type EmbeddingConfig struct {
