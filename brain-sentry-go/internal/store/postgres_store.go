@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/integraltech/brainsentry/internal/domain"
 	"github.com/integraltech/brainsentry/internal/repository/postgres"
@@ -62,6 +63,14 @@ func (s *PostgresStore) Get(ctx context.Context, id string) (MemoryRecord, error
 	}
 	m, err := s.repo.FindByID(ctx, id)
 	if err != nil {
+		// FindByID wraps pgx.ErrNoRows for missing rows; surface that as
+		// the store-level ErrNotFound so handler can map it to 404 instead
+		// of 500. Without this check a GET on a freshly-deleted memory
+		// 500s, which broke /v1/store/memories' "delete then GET → 404"
+		// contract.
+		if errors.Is(err, pgx.ErrNoRows) {
+			return MemoryRecord{}, ErrNotFound
+		}
 		return MemoryRecord{}, err
 	}
 	if m == nil {
