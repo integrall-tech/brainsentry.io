@@ -31,9 +31,11 @@ RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 ENV NODE_OPTIONS=--max-old-space-size=4096
 
 # Install deps first so source-only changes don't bust the install layer.
+# pnpm-workspace.yaml carries the `allowBuilds: { esbuild: true }`
+# opt-in for esbuild's postinstall (pnpm 11's strict default).
 # BuildKit cache mount on pnpm's store dir reuses fetched tarballs
-# across builds (the store is content-addressable so it stays sane).
-COPY package.json pnpm-lock.yaml ./
+# across builds (content-addressable so it stays sane).
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 
