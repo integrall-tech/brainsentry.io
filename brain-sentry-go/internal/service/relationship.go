@@ -140,8 +140,14 @@ func (s *RelationshipService) DetectAndCreateRelationships(ctx context.Context, 
 
 	tenantID := tenant.FromContext(ctx)
 
-	// Search similar memories
-	similar, err := s.memoryRepo.FullTextSearch(ctx, m.Content[:min(len(m.Content), 200)], 10)
+	// Search similar memories using the OR-of-significant-tokens variant.
+	// plainto_tsquery (used by FullTextSearch) ANDs every word in the
+	// query, so for a 200-char content snippet it returned zero candidates
+	// for any non-trivial source — silently disabling relationship
+	// suggestion. FullTextSearchSimilar extracts the top significant
+	// tokens and OR's them via websearch_to_tsquery, giving a realistic
+	// candidate set ranked by ts_rank.
+	similar, err := s.memoryRepo.FullTextSearchSimilar(ctx, m.Content[:min(len(m.Content), 200)], 10)
 	if err != nil {
 		slog.Warn("failed to find similar memories for relationship detection", "error", err)
 		return
