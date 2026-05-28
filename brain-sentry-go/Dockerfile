@@ -21,8 +21,19 @@ RUN go mod download
 
 # Bring in source and build a stripped, statically-linked binary.
 COPY . .
+
+# Build-time identity, injected into cmd/server/main.go's package vars
+# and surfaced at GET /version + /api/version. The workflow passes these
+# from docker/metadata-action so the image labels and the running
+# binary always agree.
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_TIME=unknown
 RUN CGO_ENABLED=0 GOOS=linux go build \
-    -ldflags="-s -w" \
+    -ldflags="-s -w \
+      -X main.version=${VERSION} \
+      -X main.commit=${COMMIT} \
+      -X main.buildTime=${BUILD_TIME}" \
     -trimpath \
     -o /out/brainsentry ./cmd/server
 

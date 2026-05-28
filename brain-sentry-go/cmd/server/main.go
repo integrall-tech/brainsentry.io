@@ -32,6 +32,20 @@ import (
 	"github.com/integraltech/brainsentry/pkg/trust"
 )
 
+// Build-time identity. Overridden by the Dockerfile via -ldflags
+//
+//	-X main.version=...
+//	-X main.commit=...
+//	-X main.buildTime=...
+//
+// so the running binary always knows which image it is, exposed at
+// the public GET /version (and /api/version under context_path).
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildTime = "unknown"
+)
+
 func main() {
 	// Logger
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -798,9 +812,11 @@ func main() {
 	publicPaths := []string{
 		cfg.Server.ContextPath + "/v1/auth/",
 		cfg.Server.ContextPath + "/health",
+		cfg.Server.ContextPath + "/version",
 		cfg.Server.ContextPath + "/v1/diagnostics",
 		cfg.Server.ContextPath + "/v1/models",
 		"/health",
+		"/version",
 		"/metrics",
 		"/swagger.json",
 	}
@@ -810,10 +826,21 @@ func main() {
 	// Prometheus metrics endpoint (no auth — listed in publicPaths above)
 	r.Handle("/metrics", promhttp.Handler())
 
+	// Build a version handler from the -ldflags-injected vars so /version
+	// and /api/version always tell the truth about which image is up.
+	versionInfo := handler.VersionInfo{
+		Version:   version,
+		Commit:    commit,
+		BuildTime: buildTime,
+	}
+
 	// Routes
 	r.Route(cfg.Server.ContextPath, func(r chi.Router) {
 		// Health
 		r.Get("/health", handler.Health)
+
+		// Build identity (public, no auth)
+		r.Get("/version", handler.VersionHandler(versionInfo))
 
 		// Diagnostics ("doctor") — same engine as the brainsentry CLI.
 		r.Get("/v1/diagnostics", diagnosticsHandler.Get)
@@ -1209,8 +1236,10 @@ func main() {
 		})
 	})
 
-	// Also mount health at root for container probes
+	// Also mount health + version at root for container probes that
+	// don't know about the configurable context_path.
 	r.Get("/health", handler.Health)
+	r.Get("/version", handler.VersionHandler(versionInfo))
 
 	// Swagger/OpenAPI spec
 	r.Get("/swagger.json", handler.SwaggerSpec)
