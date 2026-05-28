@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/integraltech/brainsentry/internal/domain"
 	"github.com/integraltech/brainsentry/internal/service"
+	"github.com/integraltech/brainsentry/pkg/tenant"
 )
 
 // RelationshipHandler handles memory relationship endpoints.
@@ -196,7 +198,16 @@ func (h *RelationshipHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go h.relService.DetectAndCreateRelationships(r.Context(), m)
+	// r.Context() is cancelled the moment this handler returns
+	// (writeJSON below is synchronous, so the request completes before the
+	// goroutine's first call). Building a background context that preserves
+	// the tenant lets DetectAndCreateRelationships actually run — without
+	// this fix every call here was a silent no-op: the first DB query in
+	// the goroutine failed with "full text search: context canceled"
+	// before any relationship was detected or created. Surfaced by the
+	// sales-corpus-llm validation scenario.
+	bgCtx := tenant.WithTenant(context.Background(), tenant.FromContext(r.Context()))
+	go h.relService.DetectAndCreateRelationships(bgCtx, m)
 
 	writeJSON(w, http.StatusAccepted, map[string]string{"message": "relationship detection started"})
 }
