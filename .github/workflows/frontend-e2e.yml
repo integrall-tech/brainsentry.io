@@ -28,15 +28,23 @@ jobs:
 
       - name: Pin npm to a version with the exit-handler fix
         # The npm bundled with some Node 22.x patches still ships
-        # 10.5/10.8.0 where `npm ci` on large dep trees can hang for
-        # 8min+ before crashing with "Exit handler never called!".
-        # 10.9.3 is post-fix and matches the Dockerfile.
+        # 10.5/10.8.0 where `npm ci` on large dep trees can hang ~8min
+        # before crashing with "Exit handler never called!".
         run: npm install -g npm@10.9.3
 
       - name: Install Dependencies
+        # Symmetric with brain-sentry-frontend/Dockerfile: long fetch
+        # timeouts + low socket count + no audit/fund/update-notifier so
+        # one slow registry response doesn't trigger the exit-handler
+        # bug. setup-node's `cache: npm` above already populates
+        # ~/.npm so most fetches hit cache.
         env:
           NODE_OPTIONS: --max-old-space-size=4096
           NPM_CONFIG_UPDATE_NOTIFIER: "false"
+          NPM_CONFIG_FETCH_TIMEOUT: "600000"
+          NPM_CONFIG_FETCH_RETRY_MINTIMEOUT: "20000"
+          NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: "120000"
+          NPM_CONFIG_MAXSOCKETS: "4"
         run: npm ci --no-audit --no-fund --prefer-offline
 
       - name: Install Playwright Browsers
