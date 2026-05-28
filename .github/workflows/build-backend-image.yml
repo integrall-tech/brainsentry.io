@@ -1,0 +1,78 @@
+name: Build Backend Image
+
+# Trigger on backend changes to main, on version tags, and on demand.
+# Pull requests build but do NOT push (smoke test only).
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+    paths:
+      - 'brain-sentry-go/**'
+      - '.github/workflows/build-backend-image.yml'
+  pull_request:
+    paths:
+      - 'brain-sentry-go/**'
+      - '.github/workflows/build-backend-image.yml'
+  workflow_dispatch:
+
+# packages: write lets GITHUB_TOKEN publish to the org's GHCR namespace
+# (possible because integrall-tech is the repo owner — same scope).
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/integrall-tech/brainsentry-backend
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags + labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=branch
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./brain-sentry-go
+          file: ./brain-sentry-go/Dockerfile
+          # Single-arch (amd64) by default — most VPS hosts are x86_64.
+          # To enable arm64 too, add it here AND uncomment the QEMU setup
+          # action above: linux/amd64,linux/arm64.
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Injected into main.version / main.commit / main.buildTime
+          # via -ldflags, surfaced at GET /version.
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ github.event.repository.updated_at }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+          provenance: false

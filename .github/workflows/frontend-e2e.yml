@@ -19,21 +19,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # pnpm via corepack — `npm ci` consistently hung ~8min on this
+      # repo's dep tree and tripped npm 10.x's "Exit handler never
+      # called!" bug. pnpm with the committed pnpm-lock.yaml runs the
+      # same install in ~10s. Pin the version so CI matches the image
+      # build and developer machines.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.4.0
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: brain-sentry-frontend/package-lock.json
+          cache: pnpm
+          cache-dependency-path: brain-sentry-frontend/pnpm-lock.yaml
 
       - name: Install Dependencies
-        run: npm ci
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: pnpm install --frozen-lockfile
 
       - name: Install Playwright Browsers
-        run: npx playwright install --with-deps
+        run: pnpm exec playwright install --with-deps
 
       - name: Run Playwright Tests
-        run: npx playwright test
+        run: pnpm exec playwright test
 
       - name: Upload Playwright Report
         if: always()

@@ -17,6 +17,10 @@ type Config struct {
 	Security     SecurityConfig     `yaml:"security"`
 	Tenant       TenantConfig       `yaml:"tenant"`
 	AI           AIConfig           `yaml:"ai"`
+	Anthropic    AnthropicProviderConfig `yaml:"anthropic"`
+	Gemini       GeminiProviderConfig    `yaml:"gemini"`
+	Models       ModelsConfig       `yaml:"models"`
+	Store        StoreConfig        `yaml:"store"`
 	Embedding    EmbeddingConfig    `yaml:"embedding"`
 	Interception InterceptionConfig `yaml:"interception"`
 	Memory       MemoryConfig       `yaml:"memory"`
@@ -91,6 +95,56 @@ type AIConfig struct {
 	MaxTokens   int           `yaml:"max_tokens"`
 	Timeout     time.Duration `yaml:"timeout"`
 	MaxRetries  int           `yaml:"max_retries"`
+}
+
+// AnthropicProviderConfig holds optional native Anthropic credentials. When
+// APIKey is non-empty the server adds AnthropicProvider to the LLM fallback
+// chain and registers an Anthropic scorer for the cross-modal eval gate.
+type AnthropicProviderConfig struct {
+	APIKey      string        `yaml:"api_key"`
+	BaseURL     string        `yaml:"base_url"`
+	Model       string        `yaml:"model"`
+	MaxTokens   int           `yaml:"max_tokens"`
+	Temperature float64       `yaml:"temperature"`
+	Timeout     time.Duration `yaml:"timeout"`
+}
+
+// GeminiProviderConfig holds optional native Google Gemini credentials. Same
+// opt-in semantics as Anthropic.
+type GeminiProviderConfig struct {
+	APIKey      string        `yaml:"api_key"`
+	BaseURL     string        `yaml:"base_url"`
+	Model       string        `yaml:"model"`
+	MaxTokens   int           `yaml:"max_tokens"`
+	Temperature float64       `yaml:"temperature"`
+	Timeout     time.Duration `yaml:"timeout"`
+}
+
+// ModelsConfig is the operator-facing tier routing config. Optional —
+// resolution falls back to AI.Model and built-in tier defaults when unset.
+// See internal/models/tiers.go for the full resolution chain.
+type ModelsConfig struct {
+	Default string            `yaml:"default"`
+	Tier    map[string]string `yaml:"tier"`
+}
+
+// StoreConfig selects the backend behind the small store.MemoryStore
+// surface (mounted at /v1/store/memories). The full production memory
+// pipeline always uses Postgres; this knob exists so the zero-config
+// embedded mode (`brainsentry init --embedded`) can serve a working API
+// without Postgres at all.
+//
+// backend = "" or "postgres" → store.PostgresStore wraps the existing repo
+// backend = "embedded"        → store.EmbeddedStore at Embedded.Path
+type StoreConfig struct {
+	Backend  string             `yaml:"backend"`
+	Embedded EmbeddedStoreConfig `yaml:"embedded"`
+}
+
+// EmbeddedStoreConfig points the embedded backend at a JSON file. Created
+// on first write; safe to point at a non-existent path.
+type EmbeddedStoreConfig struct {
+	Path string `yaml:"path"`
 }
 
 type EmbeddingConfig struct {

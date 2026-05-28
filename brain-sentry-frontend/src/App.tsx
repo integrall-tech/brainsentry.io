@@ -36,6 +36,8 @@ import ProvenancePage from "./pages/ProvenancePage";
 import GraphGlobalPage from "./pages/GraphGlobalPage";
 import GraphEgoPage from "./pages/GraphEgoPage";
 import GraphTimelinePage from "./pages/GraphTimelinePage";
+import DiagnosticsPage from "./pages/DiagnosticsPage";
+import ModelsPage from "./pages/ModelsPage";
 import { LandingPage } from "./landing/pages/LandingPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -109,6 +111,8 @@ function App() {
                 <Route path="graph/global" element={<GraphGlobalPage />} />
                 <Route path="graph/ego" element={<GraphEgoPage />} />
                 <Route path="graph/timeline" element={<GraphTimelinePage />} />
+                <Route path="diagnostics" element={<DiagnosticsPage />} />
+                <Route path="models" element={<ModelsPage />} />
               </Route>
 
               {/* Legacy redirect - /dashboard -> /app/dashboard */}

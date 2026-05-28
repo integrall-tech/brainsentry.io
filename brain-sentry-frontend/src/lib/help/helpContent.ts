@@ -1130,6 +1130,100 @@ export const helpContent: Record<string, HelpEntry> = {
     ),
   },
 
+  "/app/diagnostics": {
+    ptBR: pt(
+      "Diagnóstico do Sistema",
+      "Tudo está funcionando?",
+      "Saber, em segundos, se algum componente do sistema está degradado ou fora do ar — antes que o usuário final note.",
+      "Quando uma busca demora muito, um login falha ou um agente não responde, você precisa de uma resposta rápida: é a base de dados, o cache, o provedor de IA, a rede? Esta tela checa todos os componentes e aponta exatamente o que está estranho.",
+      [
+        "Cada componente externo (banco, cache, grafo, IA) é testado em paralelo",
+        "Cada check leva até alguns segundos e mostra latência, mensagem e dica",
+        "O resultado agregado vira uma cor: verde, amarelo (atenção) ou vermelho (falha)",
+        "É um espelho do comando 'brainsentry doctor' do terminal — mesmo motor, mesmo critério",
+      ],
+      [
+        { numero: 1, acao: "Abra esta tela quando algo parecer fora do ar", esperado: "Carrega o relatório atual em poucos segundos" },
+        { numero: 2, acao: "Procure linhas em vermelho ou amarelo", esperado: "Cada uma traz um detalhe e uma dica de ação" },
+        { numero: 3, acao: "Clique em 'Rodar novamente' depois de aplicar correções", esperado: "Status muda para verde se o problema foi resolvido" },
+      ],
+      [
+        "Vermelho não é alarme falso — costuma indicar perda real de funcionalidade",
+        "Amarelo costuma ser tolerável (cache ausente, por exemplo) mas vale investigar",
+        "Use junto com seus dashboards de monitoramento, não no lugar deles",
+      ],
+    ),
+    en: pt(
+      "System Diagnostics",
+      "Is everything actually working?",
+      "Know in seconds whether any system component is degraded or down — before the end user notices.",
+      "When a search lags, a login fails or an agent stops responding, you need a quick answer: is it the database, the cache, the AI provider, the network? This screen probes all components and points to exactly what is off.",
+      [
+        "Each external dependency (DB, cache, graph, AI) is tested in parallel",
+        "Each check shows latency, message and a hint",
+        "Aggregate result is a color: green, amber (warning), red (failure)",
+        "Mirror of the 'brainsentry doctor' CLI — same engine, same criteria",
+      ],
+      [
+        { numero: 1, acao: "Open this screen when something feels off", esperado: "Loads the current report in seconds" },
+        { numero: 2, acao: "Look for red or amber rows", esperado: "Each carries a detail and an action hint" },
+        { numero: 3, acao: "Click 'Run again' after applying fixes", esperado: "Turns green when resolved" },
+      ],
+      [
+        "Red is rarely a false alarm — usually a real loss of functionality",
+        "Amber is often tolerable (missing cache, for example) but worth checking",
+        "Pair with your monitoring dashboards, not as a replacement",
+      ],
+    ),
+  },
+
+  "/app/models": {
+    ptBR: pt(
+      "Roteamento de Modelos",
+      "Qual IA está sendo usada para o quê",
+      "Cada tipo de tarefa precisa de um modelo diferente. Tarefas curtas pedem rapidez; análises profundas pedem capacidade. Aqui você vê e ajusta essa escolha.",
+      "Sem essa visibilidade, é fácil pagar caro por tarefas simples ou usar modelo barato em decisões importantes — duas formas diferentes de errar.",
+      [
+        "4 camadas: utilitário (rápido), raciocínio (cuidadoso), profundo (longo contexto), sub-agente (usa ferramentas)",
+        "Origem da escolha mostra de onde veio o modelo (config, env, padrão)",
+        "O botão 'Testar provedores' faz uma chamada de 1 token em cada modelo configurado",
+        "Falhas são classificadas (modelo não existe, autenticação, limite de uso, rede, tempo esgotado) com dica de ação",
+      ],
+      [
+        { numero: 1, acao: "Veja a tabela de roteamento atual", esperado: "Cada camada mostra modelo + origem da escolha" },
+        { numero: 2, acao: "Clique 'Testar provedores'", esperado: "Cada camada vira PASS verde ou FAIL vermelho com motivo" },
+        { numero: 3, acao: "Se algo falhar, leia a dica e ajuste config.yaml ou env vars", esperado: "Após nova tentativa, status muda para verde" },
+      ],
+      [
+        "Modelo 'fantasma' (ID errado) costuma virar falha 'modelo não existe' — confira espaço, hífen e versão",
+        "Falha de autenticação = chave inválida ou conta sem acesso àquele modelo",
+        "Limite de uso costuma resolver sozinho em alguns minutos; rede e DNS exigem investigação",
+      ],
+    ),
+    en: pt(
+      "Model Routing",
+      "Which AI is used for what",
+      "Each task type needs a different model. Short tasks want speed; deep analyses want capacity. Here you see and tune that choice.",
+      "Without this visibility, it is easy to overpay for simple tasks or use a cheap model on important decisions — two different ways to be wrong.",
+      [
+        "4 tiers: utility (fast), reasoning (careful), deep (long context), sub-agent (uses tools)",
+        "Source shows where the model came from (config, env, default)",
+        "'Probe providers' fires a 1-token call against each configured model",
+        "Failures are classified (model not found, auth, rate limit, network, timeout) with an action hint",
+      ],
+      [
+        { numero: 1, acao: "Look at the current routing table", esperado: "Each tier shows model + source" },
+        { numero: 2, acao: "Click 'Probe providers'", esperado: "Each tier turns green PASS or red FAIL with reason" },
+        { numero: 3, acao: "On failure, read the hint and adjust config.yaml or env vars", esperado: "After re-probe the row turns green" },
+      ],
+      [
+        "A 'phantom' model id often shows up as model_not_found — check spaces, hyphens and version",
+        "Auth failure = invalid key or account without access to that model",
+        "Rate limit usually resolves in minutes; network/DNS need investigation",
+      ],
+    ),
+  },
+
   "/app/analytics": {
     ptBR: pt(
       "Analytics",

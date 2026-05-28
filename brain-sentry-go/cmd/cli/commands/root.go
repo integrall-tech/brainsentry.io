@@ -29,6 +29,11 @@ func init() {
 		newCorrectCmd(app),
 		newReviewCmd(app),
 		newImportCmd(app),
+		newDoctorCmd(app),
+		newModelsCmd(app),
+		newEvalCmd(app),
+		newInitCmd(app),
+		newRebuildCmd(app),
 	)
 }
 

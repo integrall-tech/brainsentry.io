@@ -40,6 +40,22 @@ func (c *Client) Close() error {
 	return c.rdb.Close()
 }
 
+// DropGraph wipes the entire FalkorDB graph this client points at. Used by
+// the rebuild executor; do not call from request-path code. Idempotent:
+// dropping an already-missing graph is treated as success.
+func (c *Client) DropGraph(ctx context.Context) error {
+	cmd := c.rdb.Do(ctx, "GRAPH.DELETE", c.graphName)
+	if err := cmd.Err(); err != nil {
+		// FalkorDB returns an error when the graph doesn't exist; treat as
+		// no-op since the desired end state is "graph absent".
+		if strings.Contains(err.Error(), "Graph was not found") || strings.Contains(err.Error(), "Invalid graph") {
+			return nil
+		}
+		return fmt.Errorf("graph delete: %w", err)
+	}
+	return nil
+}
+
 // QueryResult represents the result of a Cypher query.
 type QueryResult struct {
 	Records []Record

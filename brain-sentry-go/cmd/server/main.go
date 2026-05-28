@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,13 +17,33 @@ import (
 
 	"github.com/integraltech/brainsentry/internal/cache"
 	"github.com/integraltech/brainsentry/internal/config"
+	"github.com/integraltech/brainsentry/internal/diagnostics"
+	"github.com/integraltech/brainsentry/internal/eval"
 	"github.com/integraltech/brainsentry/internal/handler"
+	modelsrouting "github.com/integraltech/brainsentry/internal/models"
 	"github.com/integraltech/brainsentry/internal/mcp"
 	"github.com/integraltech/brainsentry/internal/middleware"
+	"github.com/integraltech/brainsentry/internal/rebuild"
 	graphrepo "github.com/integraltech/brainsentry/internal/repository/graph"
 	"github.com/integraltech/brainsentry/internal/repository/postgres"
 	"github.com/integraltech/brainsentry/internal/service"
+	"github.com/integraltech/brainsentry/internal/store"
 	"github.com/integraltech/brainsentry/pkg/lazy"
+	"github.com/integraltech/brainsentry/pkg/trust"
+)
+
+// Build-time identity. Overridden by the Dockerfile via -ldflags
+//
+//	-X main.version=...
+//	-X main.commit=...
+//	-X main.buildTime=...
+//
+// so the running binary always knows which image it is, exposed at
+// the public GET /version (and /api/version under context_path).
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildTime = "unknown"
 )
 
 func main() {
@@ -30,6 +52,14 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
+
+	// Operator-mode flags. --rebuild + --confirm-destructive run the
+	// rebuild executor in-process after services are wired, then exit.
+	// Trust elevation lives here (not in the HTTP path) — process is
+	// already on the operator's host.
+	rebuildTargets := flag.String("rebuild", "", "comma-separated rebuild targets (e.g. graph,embeddings,communities,compress); when set, run them and exit")
+	rebuildConfirm := flag.Bool("confirm-destructive", false, "required to actually run --rebuild; without it, rebuild dry-runs")
+	flag.Parse()
 
 	// Config
 	cfgPath := "config.yaml"
@@ -232,12 +262,58 @@ func main() {
 
 	// ---- P1-P3 New Services ----
 
-	// Fallback Chain LLM Provider
+	// Fallback Chain LLM Provider. Order matters: the first provider with
+	// credentials becomes primary, subsequent ones backstop it when the
+	// primary's circuit opens. Anthropic+Gemini natives skip the OpenRouter
+	// hop (lower latency, prompt caching), so when configured they go first.
 	var llmProvider service.LLMProvider
+	chain := make([]service.LLMProvider, 0, 3)
+	if cfg.Anthropic.APIKey != "" {
+		ac := service.DefaultAnthropicConfig(cfg.Anthropic.APIKey)
+		if cfg.Anthropic.BaseURL != "" {
+			ac.BaseURL = cfg.Anthropic.BaseURL
+		}
+		if cfg.Anthropic.Model != "" {
+			ac.Model = cfg.Anthropic.Model
+		}
+		if cfg.Anthropic.MaxTokens > 0 {
+			ac.MaxTokens = cfg.Anthropic.MaxTokens
+		}
+		if cfg.Anthropic.Temperature != 0 {
+			ac.Temperature = cfg.Anthropic.Temperature
+		}
+		if cfg.Anthropic.Timeout > 0 {
+			ac.Timeout = cfg.Anthropic.Timeout
+		}
+		chain = append(chain, service.NewAnthropicProvider(ac))
+		logger.Info("Anthropic native provider added to chain", "model", ac.Model)
+	}
+	if cfg.Gemini.APIKey != "" {
+		gc := service.DefaultGeminiConfig(cfg.Gemini.APIKey)
+		if cfg.Gemini.BaseURL != "" {
+			gc.BaseURL = cfg.Gemini.BaseURL
+		}
+		if cfg.Gemini.Model != "" {
+			gc.Model = cfg.Gemini.Model
+		}
+		if cfg.Gemini.MaxTokens > 0 {
+			gc.MaxTokens = cfg.Gemini.MaxTokens
+		}
+		if cfg.Gemini.Temperature != 0 {
+			gc.Temperature = cfg.Gemini.Temperature
+		}
+		if cfg.Gemini.Timeout > 0 {
+			gc.Timeout = cfg.Gemini.Timeout
+		}
+		chain = append(chain, service.NewGeminiProvider(gc))
+		logger.Info("Gemini native provider added to chain", "model", gc.Model)
+	}
 	if openRouterService != nil {
-		primary := service.NewOpenRouterProvider(openRouterService)
-		llmProvider = service.NewFallbackChainProvider(primary)
-		logger.Info("LLM fallback chain initialized")
+		chain = append(chain, service.NewOpenRouterProvider(openRouterService))
+	}
+	if len(chain) > 0 {
+		llmProvider = service.NewFallbackChainProvider(chain...)
+		logger.Info("LLM fallback chain initialized", "providers", len(chain))
 	}
 
 	// Memory Compression Pipeline
@@ -526,6 +602,140 @@ func main() {
 		graphViewHandler = handler.NewGraphViewHandler(memoryRepo, graphClient, graphRAGRepo, louvainService)
 	}
 
+	// Diagnostics ("doctor") — TCP probes for every external dependency the
+	// running server can reach, plus a Postgres ping closure so the operator
+	// learns immediately if connectivity has degraded.
+	diagCheckers := []diagnostics.Checker{
+		&diagnostics.TCPChecker{
+			CheckName: "postgres",
+			Sev:       diagnostics.SeverityCritical,
+			Host:      cfg.Database.Host,
+			Port:      cfg.Database.Port,
+			Hint:      "verify docker compose ps and credentials",
+		},
+		&diagnostics.TCPChecker{
+			CheckName: "falkordb",
+			Sev:       diagnostics.SeverityWarning,
+			Host:      cfg.FalkorDB.Host,
+			Port:      cfg.FalkorDB.Port,
+			Hint:      "graph features disabled until reachable",
+		},
+		&diagnostics.TCPChecker{
+			CheckName: "redis",
+			Sev:       diagnostics.SeverityWarning,
+			Host:      cfg.Redis.Host,
+			Port:      cfg.Redis.Port,
+			Hint:      "rate-limit + caching degraded without redis",
+		},
+		&diagnostics.FuncChecker{
+			CheckName: "postgres-ping",
+			Fn: func(ctx context.Context) diagnostics.CheckResult {
+				if err := pool.Ping(ctx); err != nil {
+					return diagnostics.CheckResult{
+						Status: diagnostics.StatusFail, Severity: diagnostics.SeverityCritical,
+						Message: "ping failed", Detail: err.Error(),
+					}
+				}
+				return diagnostics.CheckResult{
+					Status: diagnostics.StatusOK, Severity: diagnostics.SeverityCritical,
+					Message: "round-trip ok",
+				}
+			},
+		},
+	}
+	if cfg.AI.APIKey != "" && cfg.AI.BaseURL != "" {
+		diagCheckers = append(diagCheckers, &diagnostics.HTTPChecker{
+			CheckName: "openrouter",
+			Sev:       diagnostics.SeverityWarning,
+			URL:       cfg.AI.BaseURL,
+			Method:    "GET",
+			Hint:      "verify OPENROUTER_API_KEY and account funding",
+		})
+	}
+	doctor := diagnostics.New(diagCheckers, 4*time.Second)
+	diagnosticsHandler := handler.NewDiagnosticsHandler(doctor)
+
+	adminTrustHandler := handler.NewAdminTrustHandler(redisCache)
+
+	// Eval candidates store — opt-in capture via BRAINSENTRY_EVAL_CAPTURE=1.
+	// Ring-buffer at 5000 keeps memory bounded if the operator forgets to
+	// drain. Resets after every successful export.
+	evalStore := eval.NewStore(5000)
+	evalHandler := handler.NewEvalHandler(evalStore)
+	memoryHandler.WithEvalCapture(evalStore)
+
+	// Pluggable MemoryStore — proves the abstraction works end-to-end.
+	// Default backend is the existing Postgres repo wrapped as a
+	// PostgresStore (no behavior change for current deployments).
+	// Setting `store.backend: embedded` in config.yaml swaps in the
+	// JSON-file EmbeddedStore for the /v1/store/memories surface, so
+	// `brainsentry init --embedded` workspaces serve a working API
+	// without Postgres for those routes.
+	var memoryStore store.MemoryStore
+	switch cfg.Store.Backend {
+	case "embedded":
+		path := cfg.Store.Embedded.Path
+		if path == "" {
+			path = "./brain.db.json"
+		}
+		es, err := store.OpenEmbedded(path)
+		if err != nil {
+			logger.Error("embedded store init failed; /v1/store/memories disabled", "error", err)
+		} else {
+			memoryStore = es
+			logger.Info("MemoryStore: embedded backend ready", "path", path)
+		}
+	default:
+		memoryStore = store.NewPostgresStore(memoryRepo)
+		logger.Info("MemoryStore: postgres backend ready")
+	}
+	var storeMemoryHandler *handler.StoreMemoryHandler
+	if memoryStore != nil {
+		storeMemoryHandler = handler.NewStoreMemoryHandler(memoryStore)
+	}
+
+	// Tier-based model routing — operators set per-tier overrides under
+	// `models:` in config.yaml; resolution falls back to AI.Model and the
+	// built-in TierDefaults so existing configs keep working.
+	modelsCfg := modelsrouting.FromYAML(cfg.Models.Default, cfg.Models.Tier, cfg.AI.Model)
+	var modelsProber modelsrouting.Prober
+	if cfg.AI.APIKey != "" && cfg.AI.BaseURL != "" {
+		modelsProber = &modelsrouting.HTTPProber{
+			BaseURL: cfg.AI.BaseURL,
+			APIKey:  cfg.AI.APIKey,
+			Client:  &http.Client{Timeout: 10 * time.Second},
+		}
+	}
+	modelsHandler := handler.NewModelsHandler(modelsCfg, modelsProber)
+
+	// Rebuild executor: register concrete rebuilders for every derived
+	// store. Each is a thin closure over the corresponding repo/service
+	// already wired above. Targets land in alphabetical order in the
+	// report — see internal/rebuild/service.go for the contract.
+	rebuildSvc := rebuild.New()
+	if memoryGraphRepo != nil && memoryRepo != nil {
+		_ = rebuildSvc.Register("graph", rebuild.GraphRebuilder(memoryRepo, memoryGraphRepo))
+	}
+	_ = rebuildSvc.Register("embeddings", rebuild.EmbeddingsRebuilder(memoryRepo))
+	_ = rebuildSvc.Register("compress", rebuild.CompressRebuilder(memoryRepo))
+	if louvainService != nil {
+		commAdapter := rebuild.NewCommunityAdapter(tenantRepo, func(ctx context.Context, tenantID string) (int, error) {
+			res, err := louvainService.DetectCommunities(ctx, tenantID)
+			if err != nil || res == nil {
+				return 0, err
+			}
+			return len(res.Communities), nil
+		})
+		_ = rebuildSvc.Register("communities", rebuild.CommunitiesRebuilder(commAdapter))
+	}
+
+	// --rebuild=<targets> mode: run executor in-process, print report,
+	// exit. Skips HTTP server entirely. Trust elevation lives here, on
+	// the operator's host. --confirm-destructive is required.
+	if *rebuildTargets != "" {
+		runRebuildAndExit(logger, rebuildSvc, *rebuildTargets, *rebuildConfirm)
+	}
+
 	var activationHandler *handler.ActivationHandler
 	if spreadingActivationService != nil {
 		activationHandler = handler.NewActivationHandler(spreadingActivationService)
@@ -596,12 +806,17 @@ func main() {
 	r.Use(middleware.RequestLogger(logger))
 	r.Use(middleware.CORS(cfg.Security.CORS.AllowedOrigins, cfg.Security.CORS.AllowedMethods))
 	r.Use(middleware.RateLimit(rateLimiter))
+	r.Use(middleware.TrustRemote) // tag every HTTP request as untrusted-by-default
 
 	// Public paths (no auth required)
 	publicPaths := []string{
 		cfg.Server.ContextPath + "/v1/auth/",
 		cfg.Server.ContextPath + "/health",
+		cfg.Server.ContextPath + "/version",
+		cfg.Server.ContextPath + "/v1/diagnostics",
+		cfg.Server.ContextPath + "/v1/models",
 		"/health",
+		"/version",
 		"/metrics",
 		"/swagger.json",
 	}
@@ -611,10 +826,48 @@ func main() {
 	// Prometheus metrics endpoint (no auth — listed in publicPaths above)
 	r.Handle("/metrics", promhttp.Handler())
 
+	// Build a version handler from the -ldflags-injected vars so /version
+	// and /api/version always tell the truth about which image is up.
+	versionInfo := handler.VersionInfo{
+		Version:   version,
+		Commit:    commit,
+		BuildTime: buildTime,
+	}
+
 	// Routes
 	r.Route(cfg.Server.ContextPath, func(r chi.Router) {
 		// Health
 		r.Get("/health", handler.Health)
+
+		// Build identity (public, no auth)
+		r.Get("/version", handler.VersionHandler(versionInfo))
+
+		// Diagnostics ("doctor") — same engine as the brainsentry CLI.
+		r.Get("/v1/diagnostics", diagnosticsHandler.Get)
+
+		// Tier-based model routing
+		r.Get("/v1/models", modelsHandler.List)
+		r.Get("/v1/models/doctor", modelsHandler.Doctor)
+
+		// Operator-only destructive endpoints (CLI-only by trust contract)
+		r.Post("/v1/admin/wipe-embedding-cache", middleware.RequireLocalTrust(adminTrustHandler.WipeEmbeddingCache))
+
+		// Eval capture/export (opt-in via BRAINSENTRY_EVAL_CAPTURE=1)
+		r.Get("/v1/eval/candidates.ndjson", evalHandler.Export)
+		r.Get("/v1/eval/candidates/stats", evalHandler.Stats)
+		r.Post("/v1/eval/candidates/reset", evalHandler.Reset)
+
+		// Pluggable MemoryStore surface — same handler, postgres or
+		// embedded under the hood (see store.backend in config.yaml).
+		if storeMemoryHandler != nil {
+			r.Route("/v1/store/memories", func(r chi.Router) {
+				r.Get("/", storeMemoryHandler.List)
+				r.Post("/", storeMemoryHandler.Create)
+				r.Get("/search", storeMemoryHandler.Search)
+				r.Get("/{id}", storeMemoryHandler.Get)
+				r.Delete("/{id}", storeMemoryHandler.Delete)
+			})
+		}
 
 		// Auth
 		r.Route("/v1/auth", func(r chi.Router) {
@@ -983,8 +1236,10 @@ func main() {
 		})
 	})
 
-	// Also mount health at root for container probes
+	// Also mount health + version at root for container probes that
+	// don't know about the configurable context_path.
 	r.Get("/health", handler.Health)
+	r.Get("/version", handler.VersionHandler(versionInfo))
 
 	// Swagger/OpenAPI spec
 	r.Get("/swagger.json", handler.SwaggerSpec)
@@ -1035,4 +1290,50 @@ func main() {
 	}
 
 	logger.Info("server stopped")
+}
+
+// runRebuildAndExit executes the requested rebuild targets in-process and
+// exits. Reached only when `--rebuild=<targets>` was passed. Trust is
+// elevated to Local: the process is on the operator's host, so the same
+// guarantee that protects HTTP-borne destructive ops is unnecessary here.
+func runRebuildAndExit(logger *slog.Logger, svc *rebuild.Service, targetsCSV string, confirm bool) {
+	targets := splitNonEmpty(targetsCSV, ",")
+	if !confirm {
+		fmt.Println("brainsentry rebuild — DRY RUN (re-run with --confirm-destructive to execute)")
+		fmt.Println("would run:", strings.Join(targets, ", "))
+		fmt.Println("registered targets:", strings.Join(svc.Targets(), ", "))
+		os.Exit(0)
+	}
+	ctx, cancel := context.WithTimeout(trust.WithLocal(context.Background()), 30*time.Minute)
+	defer cancel()
+	rep := svc.Run(ctx, targets)
+	fmt.Printf("brainsentry rebuild — completed in %dms\n", rep.Duration.Milliseconds())
+	for _, r := range rep.Results {
+		mark := "PASS"
+		if !r.OK {
+			mark = "FAIL"
+		}
+		fmt.Printf("  [%s] %-12s touched=%d duration=%dms", mark, r.Target, r.Touched, r.Duration.Milliseconds())
+		if r.Error != "" {
+			fmt.Printf("  err=%s", r.Error)
+		}
+		fmt.Println()
+	}
+	if !rep.OK {
+		logger.Error("rebuild failed", "targets", targets)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func splitNonEmpty(s, sep string) []string {
+	parts := strings.Split(s, sep)
+	out := parts[:0]
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

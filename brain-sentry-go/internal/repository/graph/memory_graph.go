@@ -20,6 +20,13 @@ func NewMemoryGraphRepository(client *Client) *MemoryGraphRepository {
 	return &MemoryGraphRepository{client: client}
 }
 
+// DropGraph wipes the entire FalkorDB graph. Operator-only — wired into
+// the rebuild executor (internal/rebuild). See the system-of-record doc
+// for context.
+func (r *MemoryGraphRepository) DropGraph(ctx context.Context) error {
+	return r.client.DropGraph(ctx)
+}
+
 // SaveToGraph stores or updates a memory node in the graph.
 func (r *MemoryGraphRepository) SaveToGraph(ctx context.Context, m *domain.Memory) error {
 	tagsStr := formatStringList(m.Tags)

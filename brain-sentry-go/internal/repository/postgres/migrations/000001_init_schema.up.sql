@@ -280,6 +280,7 @@ CREATE TABLE IF NOT EXISTS hindsight_related_notes (
 );
 
 -- Context summaries
+-- DERIVED: rebuild --compress
 CREATE TABLE IF NOT EXISTS context_summaries (
     id VARCHAR(100) PRIMARY KEY,
     tenant_id VARCHAR(100) NOT NULL,
@@ -299,21 +300,25 @@ CREATE INDEX IF NOT EXISTS idx_context_summary_session ON context_summaries(sess
 CREATE INDEX IF NOT EXISTS idx_context_summary_created_at ON context_summaries(created_at);
 
 -- Context summary element collections
+-- DERIVED: rebuild --compress
 CREATE TABLE IF NOT EXISTS context_summary_goals (
     context_summary_id VARCHAR(100) NOT NULL REFERENCES context_summaries(id) ON DELETE CASCADE,
     goal TEXT NOT NULL
 );
 
+-- DERIVED: rebuild --compress
 CREATE TABLE IF NOT EXISTS context_summary_decisions (
     context_summary_id VARCHAR(100) NOT NULL REFERENCES context_summaries(id) ON DELETE CASCADE,
     decision TEXT NOT NULL
 );
 
+-- DERIVED: rebuild --compress
 CREATE TABLE IF NOT EXISTS context_summary_errors (
     context_summary_id VARCHAR(100) NOT NULL REFERENCES context_summaries(id) ON DELETE CASCADE,
     error TEXT NOT NULL
 );
 
+-- DERIVED: rebuild --compress
 CREATE TABLE IF NOT EXISTS context_summary_todos (
     context_summary_id VARCHAR(100) NOT NULL REFERENCES context_summaries(id) ON DELETE CASCADE,
     todo TEXT NOT NULL

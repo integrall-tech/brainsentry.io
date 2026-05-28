@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -279,6 +280,93 @@ func (r *MemoryRepository) FullTextSearch(ctx context.Context, query string, lim
 	return memories, nil
 }
 
+// fullTextStopwords is the small English stopword set
+// FullTextSearchSimilar uses to keep its OR-query focused on words
+// likely to carry signal. Kept intentionally short — Postgres'
+// `english` text-search config already drops most of these via stemming,
+// but we want them out BEFORE we build the query so we don't waste
+// tokens on noise (we only keep the top 8).
+var fullTextStopwords = map[string]bool{
+	"the": true, "and": true, "for": true, "with": true, "from": true,
+	"this": true, "that": true, "have": true, "will": true, "been": true,
+	"they": true, "their": true, "which": true, "what": true, "when": true,
+	"where": true, "while": true, "about": true, "into": true, "your": true,
+	"more": true, "less": true, "than": true, "then": true, "some": true,
+	"also": true, "very": true, "just": true, "only": true, "even": true,
+	"most": true, "much": true, "many": true, "such": true, "after": true,
+	"before": true, "between": true, "during": true, "over": true, "were": true,
+	"each": true, "other": true, "would": true, "could": true, "should": true,
+}
+
+// extractSignificantTokens turns free-form text into the first `max`
+// lowercase tokens that pass three filters: at least 4 characters,
+// not in fullTextStopwords, and not a duplicate. Trims surrounding
+// punctuation so common phrasing ("Acme." "memory,") still tokenizes.
+func extractSignificantTokens(text string, max int) []string {
+	out := make([]string, 0, max)
+	seen := make(map[string]bool, max)
+	for _, raw := range strings.Fields(strings.ToLower(text)) {
+		w := strings.TrimFunc(raw, func(r rune) bool {
+			return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+		})
+		if len(w) < 4 || fullTextStopwords[w] || seen[w] {
+			continue
+		}
+		seen[w] = true
+		out = append(out, w)
+		if len(out) == max {
+			break
+		}
+	}
+	return out
+}
+
+// FullTextSearchSimilar finds memories likely SIMILAR to the given text
+// by extracting its top significant tokens and OR-ing them via
+// websearch_to_tsquery. Used for relationship suggestion, where the
+// AND-all-words semantics of plainto_tsquery would return zero candidates
+// for any non-trivial query (e.g. the first 200 chars of a memory's
+// content) — every candidate has to share every word.
+//
+// Distinct from FullTextSearch so existing /v1/memories/search behaviour
+// (precise AND matching) is unchanged.
+func (r *MemoryRepository) FullTextSearchSimilar(ctx context.Context, text string, limit int) ([]domain.Memory, error) {
+	tenantID := tenant.FromContext(ctx)
+	tokens := extractSignificantTokens(text, 8)
+	if len(tokens) == 0 {
+		return nil, nil
+	}
+	// websearch_to_tsquery accepts the literal token "or" as a query
+	// operator — letting us pass an OR-of-words query without hand-rolling
+	// to_tsquery escaping for punctuation, unicode, etc.
+	tsExpr := strings.Join(tokens, " or ")
+
+	q := fmt.Sprintf(`SELECT %s FROM memories WHERE tenant_id = $1
+		AND (to_tsvector('english', coalesce(content,'') || ' ' || coalesce(summary,'')) @@ websearch_to_tsquery('english', $2))
+		AND deleted_at IS NULL
+		AND (valid_from IS NULL OR valid_from <= NOW())
+		AND (valid_to IS NULL OR valid_to > NOW())
+		AND COALESCE(superseded_by, '') = ''
+		ORDER BY ts_rank(to_tsvector('english', coalesce(content,'') || ' ' || coalesce(summary,'')), websearch_to_tsquery('english', $2)) DESC
+		LIMIT $3`, memoryColumns)
+
+	rows, err := r.pool.Query(ctx, q, tenantID, tsExpr, limit)
+	if err != nil {
+		return nil, fmt.Errorf("similar full text search: %w", err)
+	}
+	defer rows.Close()
+
+	memories, err := scanMemories(rows)
+	if err != nil {
+		return nil, err
+	}
+	for i := range memories {
+		tags, _ := r.loadTags(ctx, memories[i].ID)
+		memories[i].Tags = tags
+	}
+	return memories, nil
+}
+
 // IncrementAccessCount increments the access counter and updates last accessed time.
 func (r *MemoryRepository) IncrementAccessCount(ctx context.Context, id string) error {
 	tenantID := tenant.FromContext(ctx)
@@ -450,6 +538,29 @@ func (r *MemoryRepository) SaveEmbedding(ctx context.Context, id string, embeddi
 		`UPDATE memories SET embedding = $1 WHERE id = $2 AND tenant_id = $3`,
 		embedding, id, tenantID)
 	return err
+}
+
+// NullifyAllEmbeddings clears the embedding column on every memory across
+// every tenant. Returns the number of rows touched. Intentionally NOT
+// tenant-scoped — this is operator-level rebuild surface; callers must
+// gate it (see internal/rebuild + trust.RequireLocalTrust).
+func (r *MemoryRepository) NullifyAllEmbeddings(ctx context.Context) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `UPDATE memories SET embedding = NULL WHERE embedding IS NOT NULL`)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// WipeAllContextSummaries truncates the LLM-compressed context_summaries
+// family across every tenant. Child tables fall via ON DELETE CASCADE.
+// Returns the number of summaries removed.
+func (r *MemoryRepository) WipeAllContextSummaries(ctx context.Context) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM context_summaries`)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }
 
 // FindByEmbeddingSimilarity finds memories by cosine similarity (PostgreSQL-based fallback).

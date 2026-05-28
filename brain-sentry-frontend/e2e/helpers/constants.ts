@@ -32,6 +32,8 @@ export const ROUTES = {
   graphGlobal: "/app/graph/global",
   graphEgo: "/app/graph/ego",
   graphTimeline: "/app/graph/timeline",
+  diagnostics: "/app/diagnostics",
+  models: "/app/models",
 } as const;
 
 export const STORAGE_KEYS = {

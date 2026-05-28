@@ -12,6 +12,7 @@ import (
 	"github.com/integraltech/brainsentry/internal/dto"
 	"github.com/integraltech/brainsentry/internal/repository/graph"
 	"github.com/integraltech/brainsentry/internal/repository/postgres"
+	"github.com/integraltech/brainsentry/internal/security"
 	"github.com/integraltech/brainsentry/pkg/tenant"
 )
 
@@ -281,7 +282,14 @@ func (s *InterceptionService) quickCheck(prompt string) bool {
 }
 
 func (s *InterceptionService) getMemorySummaries(ctx context.Context, tenantID string) []string {
-	memories, err := s.memoryRepo.FullTextSearch(ctx, "", 10) // get recent memories
+	// Get the 10 most recent memories for the LLM relevance pre-filter.
+	// The earlier implementation called FullTextSearch(ctx, "", 10), but an
+	// empty tsquery returns 0 rows in Postgres — so deep analysis never
+	// fired, /v1/intercept always returned enhanced=false with reasoning
+	// "no relevant memories found". Surfaced by the sales-intercept
+	// validation scenario.
+	_ = tenantID // List reads tenant from ctx via tenant.FromContext
+	memories, _, err := s.memoryRepo.List(ctx, 0, 10)
 	if err != nil || len(memories) == 0 {
 		return nil
 	}
@@ -340,93 +348,69 @@ func containsErrorKeywords(text string) bool {
 	return false
 }
 
-func formatContextWithNotes(memories []domain.Memory, notes []domain.HindsightNote) string {
-	var sb strings.Builder
-	sb.WriteString("<system_context>\n")
-	sb.WriteString("The following information may be relevant to the user's request:\n\n")
-
-	for i, m := range memories {
-		sb.WriteString(fmt.Sprintf("### Memory %d [%s/%s]\n", i+1, m.Category, m.Importance))
-		if m.Summary != "" {
-			sb.WriteString(m.Summary + "\n")
-		} else {
-			sb.WriteString(truncate(m.Content, 300) + "\n")
-		}
-		if m.CodeExample != "" {
-			sb.WriteString(fmt.Sprintf("```%s\n%s\n```\n", m.ProgrammingLanguage, truncate(m.CodeExample, 500)))
-		}
-		sb.WriteString("\n")
-	}
-
-	if len(notes) > 0 {
-		sb.WriteString("### Hindsight Notes (Past Issues)\n")
-		for _, n := range notes {
-			sb.WriteString(fmt.Sprintf("- **%s** [%s]: %s\n", n.Title, n.Severity, truncate(n.ErrorMessage, 200)))
-			if n.Resolution != "" {
-				sb.WriteString(fmt.Sprintf("  Resolution: %s\n", truncate(n.Resolution, 200)))
-			}
-		}
-		sb.WriteString("\n")
-	}
-
-	sb.WriteString("</system_context>")
-	return sb.String()
-}
-
 func estimateTokens(text string) int {
 	return len(text) / 4
 }
 
-// formatContextWithBudget builds context respecting a token budget via greedy packing.
+// formatContextWithBudget builds context respecting a token budget via greedy
+// packing. Every untrusted blob is wrapped in <memory> framing and run through
+// the prompt-injection sanitizer (security.Sanitize) before injection.
 func (s *InterceptionService) formatContextWithBudget(memories []domain.Memory, notes []domain.HindsightNote, tokenBudget int) string {
 	var sb strings.Builder
-	header := "<system_context>\nThe following information may be relevant to the user's request:\n\n"
+	header := "<system_context>\n" + security.SystemPromptPreamble + "\n\n"
 	footer := "</system_context>"
 	sb.WriteString(header)
 	usedTokens := estimateTokens(header) + estimateTokens(footer)
 
+	matchedAll := make(map[string]int)
+
 	// Pack memories by relevance (already sorted by importance filter)
-	for i, m := range memories {
-		var entry strings.Builder
-		entry.WriteString(fmt.Sprintf("### Memory %d [%s/%s]\n", i+1, m.Category, m.Importance))
-		if m.Summary != "" {
-			entry.WriteString(m.Summary + "\n")
-		} else {
-			entry.WriteString(truncate(m.Content, 300) + "\n")
+	for _, m := range memories {
+		body := m.Summary
+		if body == "" {
+			body = truncate(m.Content, 300)
 		}
 		if m.CodeExample != "" {
-			entry.WriteString(fmt.Sprintf("```%s\n%s\n```\n", m.ProgrammingLanguage, truncate(m.CodeExample, 500)))
+			body += fmt.Sprintf("\n```%s\n%s\n```", m.ProgrammingLanguage, truncate(m.CodeExample, 500))
 		}
-		entry.WriteString("\n")
+		framed, matched := security.FrameMemoryWithMeta(m.ID, fmt.Sprintf("%s/%s", m.Category, m.Importance), body)
+		for _, name := range matched {
+			matchedAll[name]++
+		}
+		entry := framed + "\n\n"
 
-		entryTokens := estimateTokens(entry.String())
+		entryTokens := estimateTokens(entry)
 		if usedTokens+entryTokens > tokenBudget {
-			break // budget exhausted
+			break
 		}
-		sb.WriteString(entry.String())
+		sb.WriteString(entry)
 		usedTokens += entryTokens
 	}
 
 	// Pack notes if budget allows
 	if len(notes) > 0 {
-		noteHeader := "### Hindsight Notes (Past Issues)\n"
+		noteHeader := "<!-- Hindsight Notes (Past Issues) -->\n"
 		noteHeaderTokens := estimateTokens(noteHeader)
 		if usedTokens+noteHeaderTokens < tokenBudget {
 			sb.WriteString(noteHeader)
 			usedTokens += noteHeaderTokens
 
 			for _, n := range notes {
-				var noteEntry strings.Builder
-				noteEntry.WriteString(fmt.Sprintf("- **%s** [%s]: %s\n", n.Title, n.Severity, truncate(n.ErrorMessage, 200)))
+				body := fmt.Sprintf("[%s] %s", n.Severity, truncate(n.ErrorMessage, 200))
 				if n.Resolution != "" {
-					noteEntry.WriteString(fmt.Sprintf("  Resolution: %s\n", truncate(n.Resolution, 200)))
+					body += "\nResolution: " + truncate(n.Resolution, 200)
 				}
+				framed, matched := security.FrameMemoryWithMeta("note:"+n.ID, "hindsight/"+n.Title, body)
+				for _, name := range matched {
+					matchedAll[name]++
+				}
+				noteEntry := framed + "\n"
 
-				noteTokens := estimateTokens(noteEntry.String())
+				noteTokens := estimateTokens(noteEntry)
 				if usedTokens+noteTokens > tokenBudget {
 					break
 				}
-				sb.WriteString(noteEntry.String())
+				sb.WriteString(noteEntry)
 				usedTokens += noteTokens
 			}
 			sb.WriteString("\n")
@@ -434,5 +418,11 @@ func (s *InterceptionService) formatContextWithBudget(memories []domain.Memory, 
 	}
 
 	sb.WriteString(footer)
+
+	if len(matchedAll) > 0 {
+		slog.Warn("prompt-injection patterns sanitized in context",
+			"counts", matchedAll, "memories", len(memories), "notes", len(notes))
+	}
+
 	return sb.String()
 }
