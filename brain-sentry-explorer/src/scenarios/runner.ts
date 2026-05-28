@@ -5,6 +5,11 @@
 // progress as it happens.
 
 import type { ApiCall, BrainSentryClient } from "../api/client.js";
+import {
+  type Capabilities,
+  type Capability,
+  missingCapabilities,
+} from "../capabilities.js";
 import { AssertionError } from "./assert.js";
 
 export interface StepContext {
@@ -23,9 +28,11 @@ export interface Scenario {
   title: string;
   description: string;
   steps: Step[];
+  /** Backend capabilities this scenario depends on; missing → skip. */
+  requires?: readonly Capability[];
 }
 
-export type StepStatus = "pass" | "fail";
+export type StepStatus = "pass" | "fail" | "skip";
 
 export interface StepResult {
   name: string;
@@ -42,6 +49,9 @@ export interface ScenarioResult {
   results: StepResult[];
   passed: number;
   failed: number;
+  skipped: number;
+  /** Capabilities the scenario needed but the backend doesn't have. */
+  skippedFor?: Capability[];
 }
 
 export interface RunSummary {
@@ -49,12 +59,15 @@ export interface RunSummary {
   totalSteps: number;
   totalPassed: number;
   totalFailed: number;
+  totalSkipped: number;
   ms: number;
+  capabilities?: Capabilities;
 }
 
 // Live events for the interactive runner.
 export type RunEvent =
   | { type: "scenario-start"; id: string; title: string }
+  | { type: "scenario-skip"; id: string; title: string; missing: Capability[] }
   | { type: "step-result"; scenarioId: string; result: StepResult }
   | { type: "scenario-end"; result: ScenarioResult }
   | { type: "done"; summary: RunSummary };
@@ -62,8 +75,41 @@ export type RunEvent =
 export async function runScenario(
   scenario: Scenario,
   client: BrainSentryClient,
+  capabilities?: Capabilities,
   onEvent?: (e: RunEvent) => void,
 ): Promise<ScenarioResult> {
+  // Pre-flight: if any required capability is missing, skip the whole
+  // scenario and mark each step skipped (so the count is honest).
+  const missing = capabilities
+    ? missingCapabilities(capabilities, scenario.requires)
+    : [];
+  if (missing.length > 0) {
+    onEvent?.({
+      type: "scenario-skip",
+      id: scenario.id,
+      title: scenario.title,
+      missing,
+    });
+    const results: StepResult[] = scenario.steps.map((s) => ({
+      name: s.name,
+      status: "skip",
+      ms: 0,
+      calls: [],
+      message: `requires ${missing.join(", ")}`,
+    }));
+    const scenarioResult: ScenarioResult = {
+      id: scenario.id,
+      title: scenario.title,
+      results,
+      passed: 0,
+      failed: 0,
+      skipped: results.length,
+      skippedFor: missing,
+    };
+    onEvent?.({ type: "scenario-end", result: scenarioResult });
+    return scenarioResult;
+  }
+
   onEvent?.({ type: "scenario-start", id: scenario.id, title: scenario.title });
   const ctx: StepContext = { client, vars: {} };
   const results: StepResult[] = [];
@@ -94,12 +140,14 @@ export async function runScenario(
   }
 
   const passed = results.filter((r) => r.status === "pass").length;
+  const failed = results.filter((r) => r.status === "fail").length;
   const scenarioResult: ScenarioResult = {
     id: scenario.id,
     title: scenario.title,
     results,
     passed,
-    failed: results.length - passed,
+    failed,
+    skipped: 0,
   };
   onEvent?.({ type: "scenario-end", result: scenarioResult });
   return scenarioResult;
@@ -108,21 +156,27 @@ export async function runScenario(
 export async function runAll(
   scenarios: Scenario[],
   client: BrainSentryClient,
+  capabilities?: Capabilities,
   onEvent?: (e: RunEvent) => void,
 ): Promise<RunSummary> {
   const started = performance.now();
   const scenarioResults: ScenarioResult[] = [];
   for (const scenario of scenarios) {
-    scenarioResults.push(await runScenario(scenario, client, onEvent));
+    scenarioResults.push(
+      await runScenario(scenario, client, capabilities, onEvent),
+    );
   }
   const totalPassed = scenarioResults.reduce((n, s) => n + s.passed, 0);
   const totalFailed = scenarioResults.reduce((n, s) => n + s.failed, 0);
+  const totalSkipped = scenarioResults.reduce((n, s) => n + s.skipped, 0);
   const summary: RunSummary = {
     scenarios: scenarioResults,
-    totalSteps: totalPassed + totalFailed,
+    totalSteps: totalPassed + totalFailed + totalSkipped,
     totalPassed,
     totalFailed,
+    totalSkipped,
     ms: Math.round(performance.now() - started),
+    capabilities,
   };
   onEvent?.({ type: "done", summary });
   return summary;

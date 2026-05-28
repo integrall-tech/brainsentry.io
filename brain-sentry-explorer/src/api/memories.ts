@@ -115,3 +115,104 @@ export async function tryDeleteMemory(
   if (!id) return undefined;
   return deleteMemory(c, id);
 }
+
+// --- Semantic API (high-level remember/recall/intercept) ---
+
+export interface RememberRequest {
+  text: string;
+  title?: string;
+  sessionId?: string;
+  sets?: string[];
+  tags?: string[];
+  category?: string;
+  importance?: string;
+}
+export interface RememberResponse {
+  memoryId: string;
+  sets?: string[];
+  title?: string;
+  createdAt: string;
+}
+
+export const remember = (c: BrainSentryClient, body: RememberRequest) =>
+  c.request<RememberResponse>("POST", "/v1/remember", { body });
+
+export interface RecallRequest {
+  query: string;
+  set?: string;
+  limit?: number;
+  tags?: string[];
+}
+export interface RecallResult {
+  memoryId: string;
+  content?: string;
+  relevance?: number;
+  reason?: string;
+}
+export interface RecallResponse {
+  query: string;
+  strategy: string;
+  results: RecallResult[];
+  total: number;
+}
+
+export const recall = (c: BrainSentryClient, body: RecallRequest) =>
+  c.request<RecallResponse>("POST", "/v1/recall", { body });
+
+export interface InterceptRequest {
+  prompt: string;
+  userId?: string;
+  sessionId?: string;
+  context?: Record<string, unknown>;
+  maxTokens?: number;
+  forceDeepAnalysis?: boolean;
+}
+
+export const intercept = (c: BrainSentryClient, body: InterceptRequest) =>
+  c.request("POST", "/v1/intercept", { body });
+
+// --- Router (regex-based query classifier; LLM-free) ---
+
+export const classifyQuery = (c: BrainSentryClient, query: string) =>
+  c.request<{ strategy: string; confidence: number; reasoning?: string }>(
+    "POST",
+    "/v1/router/classify",
+    { body: { query } },
+  );
+
+// --- Relationship suggestions (LLM-driven) ---
+
+export const suggestRelationships = (c: BrainSentryClient, memoryId: string) =>
+  c.request<unknown[]>("POST", `/v1/relationships/${memoryId}/suggest`);
+
+// --- Decisions (semantica; needs migration 8 / pgvector) ---
+
+export interface RecordDecisionRequest {
+  category: string;
+  scenario: string;
+  reasoning: string;
+  outcome?: string;
+  confidence?: number;
+  memoryIds?: string[];
+  tags?: string[];
+}
+
+export const recordDecision = (
+  c: BrainSentryClient,
+  body: RecordDecisionRequest,
+) => c.request("POST", "/v1/decisions/", { body });
+
+export const listDecisions = (c: BrainSentryClient, limit = 20) =>
+  c.request("GET", "/v1/decisions/", { query: { limit } });
+
+// --- Graph views (need FalkorDB) ---
+
+export const egoGraph = (
+  c: BrainSentryClient,
+  memoryId: string,
+  hops = 2,
+  limit = 30,
+) =>
+  c.request("GET", "/v1/graph/ego", {
+    query: { memoryId, hops, limit },
+  });

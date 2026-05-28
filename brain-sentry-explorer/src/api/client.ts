@@ -3,6 +3,9 @@
 // latency, body, error) instead of throwing, so both the interactive
 // explorer and the validation runner can render results uniformly.
 
+import { Agent as HttpAgent } from "node:http";
+import { Agent as HttpsAgent } from "node:https";
+
 import axios, { type AxiosInstance } from "axios";
 import type { Config } from "../config.js";
 
@@ -39,9 +42,21 @@ export class BrainSentryClient {
     this.config = config;
     this.http = axios.create({
       baseURL: config.baseUrl,
-      timeout: 30_000,
+      // 90s tolerates LLM-driven endpoints (intercept deep analysis,
+      // /v1/memories with auto-compression) whose individual round-trips
+      // can outlier past 30s on slower models. The earlier 30s value
+      // truncated 20-memory corpus seeds at random.
+      timeout: 90_000,
       // Capture every status — never throw on 4xx/5xx, the caller decides.
       validateStatus: () => true,
+      // Disable HTTP keep-alive. With LLM-heavy seeds the gap between
+      // requests can outlast the Go server's IdleTimeout, in which case
+      // axios reuses a socket the server already closed and the next
+      // request fails with "socket hang up". Single-use sockets eliminate
+      // this — the trade-off is one TCP+TLS handshake per request, which
+      // is negligible on localhost.
+      httpAgent: new HttpAgent({ keepAlive: false }),
+      httpsAgent: new HttpsAgent({ keepAlive: false }),
     });
   }
 
@@ -59,6 +74,26 @@ export class BrainSentryClient {
     method: HttpMethod,
     path: string,
     opts: RequestOptions = {},
+  ): Promise<ApiCall<T>> {
+    // Auto-retry on 429 with exponential backoff. The brain-sentry-go
+    // rate limiter (120 req/min, 60 burst) is generous for interactive use
+    // but easy to exhaust during validation seeding — retrying with
+    // backoff lets the bucket refill (~2 tokens/sec) without flooding the
+    // scenario report with rate-limit failures.
+    const maxAttempts = 5;
+    let call: ApiCall<T> = await this.doRequest<T>(method, path, opts);
+    for (let attempt = 1; attempt < maxAttempts && call.status === 429; attempt++) {
+      const waitMs = 500 * 2 ** (attempt - 1); // 500, 1000, 2000, 4000
+      await new Promise((r) => setTimeout(r, waitMs));
+      call = await this.doRequest<T>(method, path, opts);
+    }
+    return call;
+  }
+
+  private async doRequest<T>(
+    method: HttpMethod,
+    path: string,
+    opts: RequestOptions,
   ): Promise<ApiCall<T>> {
     const fullPath = path + this.buildQuery(opts.query);
     const headers: Record<string, string> = {

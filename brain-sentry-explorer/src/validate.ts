@@ -3,8 +3,12 @@
 // on any failure, so it can gate CI.
 
 import { BrainSentryClient } from "./api/client.js";
+import {
+  detectCapabilities,
+  formatCapabilities,
+} from "./capabilities.js";
 import { loadConfig } from "./config.js";
-import { memoryScenarios } from "./scenarios/memory-scenarios.js";
+import { allScenarios } from "./scenarios/index.js";
 import { runAll } from "./scenarios/runner.js";
 
 const useColor = process.stdout.isTTY;
@@ -40,17 +44,33 @@ export async function runHeadless(): Promise<number> {
     return 1;
   }
 
-  const summary = await runAll(memoryScenarios, client, (e) => {
+  // Detect capabilities once so scenarios that need pgvector / falkordb /
+  // an LLM key can skip honestly when the backend doesn't have them.
+  const caps = await detectCapabilities(client);
+  process.stdout.write(c.dim(`  caps:  ${formatCapabilities(caps)}\n\n`));
+
+  const summary = await runAll(allScenarios, client, caps, (e) => {
     if (e.type === "scenario-start") {
       process.stdout.write(c.bold(`${e.title}\n`));
+    } else if (e.type === "scenario-skip") {
+      process.stdout.write(
+        c.bold(`${e.title}`) +
+          c.dim(`  · skipped (missing ${e.missing.join(", ")})\n\n`),
+      );
     } else if (e.type === "step-result") {
       const r = e.result;
       const mark =
-        r.status === "pass" ? c.green("  ✓ ") : c.red("  ✗ ");
+        r.status === "pass"
+          ? c.green("  ✓ ")
+          : r.status === "fail"
+            ? c.red("  ✗ ")
+            : c.dim("  ⊘ ");
       process.stdout.write(`${mark}${r.name}${c.dim(`  (${r.ms}ms)`)}\n`);
-      if (r.message) process.stdout.write(c.red(`      ${r.message}\n`));
+      if (r.message && r.status === "fail") {
+        process.stdout.write(c.red(`      ${r.message}\n`));
+      }
     } else if (e.type === "scenario-end") {
-      process.stdout.write("\n");
+      if (e.result.skipped === 0) process.stdout.write("\n");
     }
   });
 
@@ -58,8 +78,13 @@ export async function runHeadless(): Promise<number> {
     summary.totalFailed === 0
       ? c.green(c.bold("ALL CHECKS PASSED"))
       : c.red(c.bold(`${summary.totalFailed} CHECK(S) FAILED`));
+  const skippedNote =
+    summary.totalSkipped > 0
+      ? c.dim(`  ·  ${summary.totalSkipped} skipped`)
+      : "";
   process.stdout.write(
     `${headline}  ${summary.totalPassed}/${summary.totalSteps} steps` +
+      skippedNote +
       c.dim(`  ·  ${summary.ms}ms\n`),
   );
 
