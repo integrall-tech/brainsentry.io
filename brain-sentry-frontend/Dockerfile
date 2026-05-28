@@ -11,22 +11,28 @@
 # swarm overlay network. To point the SPA at an external API URL instead,
 # pass `--build-arg VITE_API_URL=https://api.example.com/api`.
 
-FROM node:22-alpine AS builder
+FROM node:22-bookworm-slim AS builder
 WORKDIR /app
 
-# Defensive npm settings — `npm ci` with large dep trees on GHA runners
-# regularly trips npm 10.x's "Exit handler never called!" bug under tight
-# memory. NODE_OPTIONS bumps V8's old-space ceiling; the NPM_CONFIG_*
-# vars silence audit/fund/update-notifier calls that allocate extra
-# memory and slow installs.
+# Defensive npm settings — `npm ci` with this dep tree (Cytoscape,
+# ECharts, react-force-graph, Playwright) hangs on GHA runners and
+# eventually trips npm 10.x's "Exit handler never called!" bug. Stack:
+#   1) Debian (glibc) base avoids musl native-dep hiccups present in
+#      node:22-alpine.
+#   2) Pin npm to >=10.9 explicitly — the bundled npm on some Node 22.x
+#      patches still ships 10.5/10.8.0 where the exit-handler bug lives.
+#   3) NODE_OPTIONS bumps V8 old-space; NPM_CONFIG_* kills audit/fund/
+#      update-notifier HTTP calls that allocate extra memory.
 ENV NODE_OPTIONS=--max-old-space-size=4096 \
     NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_UPDATE_NOTIFIER=false
 
+RUN npm install -g npm@10.9.3
+
 # Install deps first so source-only changes don't bust the npm-ci layer.
 COPY package.json package-lock.json* ./
-RUN npm ci --no-audit --no-fund
+RUN npm ci --no-audit --no-fund --prefer-offline
 
 # Then source + build (tsc emit + vite build).
 COPY . .
