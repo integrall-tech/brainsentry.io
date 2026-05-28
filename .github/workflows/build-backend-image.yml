@@ -67,6 +67,12 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Injected into main.version / main.commit / main.buildTime
+          # via -ldflags, surfaced at GET /version.
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ github.event.repository.updated_at }}
           cache-from: type=gha,scope=backend
           cache-to: type=gha,scope=backend,mode=max
           provenance: false

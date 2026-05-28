@@ -32,7 +32,11 @@ RUN npm ci --no-audit --no-fund
 COPY . .
 
 ARG VITE_API_URL=/api
-ENV VITE_API_URL=${VITE_API_URL}
+ARG VITE_APP_VERSION=dev
+ARG VITE_APP_COMMIT=unknown
+ENV VITE_API_URL=${VITE_API_URL} \
+    VITE_APP_VERSION=${VITE_APP_VERSION} \
+    VITE_APP_COMMIT=${VITE_APP_COMMIT}
 RUN npm run build
 
 # --- Runtime ---

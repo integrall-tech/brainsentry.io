@@ -62,11 +62,15 @@ jobs:
           # VITE_API_URL defaults to "/api" inside the Dockerfile; the
           # baked SPA hits a relative path and nginx proxies it to the
           # brainsentry-backend service on the swarm overlay network.
-          # Override with a build-arg here if an env needs an external
-          # API URL.
+          # Override VITE_API_URL here if an env needs an external API.
+          # VITE_APP_VERSION/COMMIT are baked into the bundle so the
+          # SPA can surface them (e.g. footer or `/version` link).
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VITE_APP_VERSION=${{ steps.meta.outputs.version }}
+            VITE_APP_COMMIT=${{ github.sha }}
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,scope=frontend,mode=max
           provenance: false
