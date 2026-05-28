@@ -19,39 +19,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # pnpm via corepack — `npm ci` consistently hung ~8min on this
+      # repo's dep tree and tripped npm 10.x's "Exit handler never
+      # called!" bug. pnpm with the committed pnpm-lock.yaml runs the
+      # same install in ~10s. Pin the version so CI matches the image
+      # build and developer machines.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.4.0
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: brain-sentry-frontend/package-lock.json
-
-      - name: Pin npm to a version with the exit-handler fix
-        # The npm bundled with some Node 22.x patches still ships
-        # 10.5/10.8.0 where `npm ci` on large dep trees can hang ~8min
-        # before crashing with "Exit handler never called!".
-        run: npm install -g npm@10.9.3
+          cache: pnpm
+          cache-dependency-path: brain-sentry-frontend/pnpm-lock.yaml
 
       - name: Install Dependencies
-        # Symmetric with brain-sentry-frontend/Dockerfile: long fetch
-        # timeouts + low socket count + no audit/fund/update-notifier so
-        # one slow registry response doesn't trigger the exit-handler
-        # bug. setup-node's `cache: npm` above already populates
-        # ~/.npm so most fetches hit cache.
         env:
           NODE_OPTIONS: --max-old-space-size=4096
-          NPM_CONFIG_UPDATE_NOTIFIER: "false"
-          NPM_CONFIG_FETCH_TIMEOUT: "600000"
-          NPM_CONFIG_FETCH_RETRY_MINTIMEOUT: "20000"
-          NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: "120000"
-          NPM_CONFIG_MAXSOCKETS: "4"
-        run: npm ci --no-audit --no-fund --prefer-offline
+        run: pnpm install --frozen-lockfile
 
       - name: Install Playwright Browsers
-        run: npx playwright install --with-deps
+        run: pnpm exec playwright install --with-deps
 
       - name: Run Playwright Tests
-        run: npx playwright test
+        run: pnpm exec playwright test
 
       - name: Upload Playwright Report
         if: always()
