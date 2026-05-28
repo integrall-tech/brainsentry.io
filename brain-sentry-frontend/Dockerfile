@@ -14,9 +14,19 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 
+# Defensive npm settings — `npm ci` with large dep trees on GHA runners
+# regularly trips npm 10.x's "Exit handler never called!" bug under tight
+# memory. NODE_OPTIONS bumps V8's old-space ceiling; the NPM_CONFIG_*
+# vars silence audit/fund/update-notifier calls that allocate extra
+# memory and slow installs.
+ENV NODE_OPTIONS=--max-old-space-size=4096 \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_UPDATE_NOTIFIER=false
+
 # Install deps first so source-only changes don't bust the npm-ci layer.
 COPY package.json package-lock.json* ./
-RUN npm ci
+RUN npm ci --no-audit --no-fund
 
 # Then source + build (tsc emit + vite build).
 COPY . .

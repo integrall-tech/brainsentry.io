@@ -27,7 +27,13 @@ jobs:
           cache-dependency-path: brain-sentry-frontend/package-lock.json
 
       - name: Install Dependencies
-        run: npm ci
+        # NODE_OPTIONS bumps V8's old-space; --no-audit/--no-fund silence
+        # the network calls that aggravate npm 10.x's "Exit handler
+        # never called!" bug on GHA runners with large dep trees.
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+          NPM_CONFIG_UPDATE_NOTIFIER: "false"
+        run: npm ci --no-audit --no-fund
 
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps
