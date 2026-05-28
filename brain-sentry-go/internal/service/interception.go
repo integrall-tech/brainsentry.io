@@ -282,7 +282,14 @@ func (s *InterceptionService) quickCheck(prompt string) bool {
 }
 
 func (s *InterceptionService) getMemorySummaries(ctx context.Context, tenantID string) []string {
-	memories, err := s.memoryRepo.FullTextSearch(ctx, "", 10) // get recent memories
+	// Get the 10 most recent memories for the LLM relevance pre-filter.
+	// The earlier implementation called FullTextSearch(ctx, "", 10), but an
+	// empty tsquery returns 0 rows in Postgres — so deep analysis never
+	// fired, /v1/intercept always returned enhanced=false with reasoning
+	// "no relevant memories found". Surfaced by the sales-intercept
+	// validation scenario.
+	_ = tenantID // List reads tenant from ctx via tenant.FromContext
+	memories, _, err := s.memoryRepo.List(ctx, 0, 10)
 	if err != nil || len(memories) == 0 {
 		return nil
 	}
