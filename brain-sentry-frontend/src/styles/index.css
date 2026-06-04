@@ -75,4 +75,47 @@
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
+
+  /* Custom scrollbar — matches the Brain Sentry palette in both themes.
+   * Track: transparent so the underlying surface (sidebar, card, etc)
+   * shows through. Thumb: subtle in resting state, lit with the brand
+   * orange on hover/active so scrolling feels intentional.
+   *
+   * Webkit (Chrome/Safari/Edge) uses ::-webkit-scrollbar; Firefox uses
+   * the scrollbar-color shorthand. Both branches apply to every
+   * scrollable element via *. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.25) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.25);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    transition: background-color 150ms ease;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--brain-primary) / 0.7);
+  }
+  *::-webkit-scrollbar-thumb:active {
+    background-color: hsl(var(--brain-primary));
+  }
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* Firefox can't tint thumb on hover, so we lift the rest opacity a
+   * touch when the element itself is hovered. */
+  *:hover {
+    scrollbar-color: hsl(var(--brain-primary) / 0.5) transparent;
+  }
 }
