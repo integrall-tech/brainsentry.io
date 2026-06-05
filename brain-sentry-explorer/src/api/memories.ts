@@ -28,6 +28,35 @@ export const getMemory = (c: BrainSentryClient, id: string) =>
 export const getTrust = (c: BrainSentryClient, id: string) =>
   c.request<TrustReport>("GET", `/v1/memories/${id}/trust`);
 
+// POST /v1/memories/upload — ingest a document (txt/md/csv/json/docx).
+// Each chunk becomes a memory with provenance IMPORTED.
+export interface UploadResult {
+  filename: string;
+  chunks: number;
+  created: string[];
+  createdLen: number;
+  provenance?: string;
+}
+export const uploadFile = (
+  c: BrainSentryClient,
+  filename: string,
+  content: string | Uint8Array,
+  fields: { category?: string; importance?: string; chunkChars?: number } = {},
+) => {
+  const form = new FormData();
+  // Both string and Uint8Array are valid Blob parts at runtime; the
+  // explicit branches keep TS happy without referencing the DOM-only
+  // BlobPart type (absent from the Node lib).
+  const blob =
+    typeof content === "string" ? new Blob([content]) : new Blob([content]);
+  form.append("file", blob, filename);
+  if (fields.category) form.append("category", fields.category);
+  if (fields.importance) form.append("importance", fields.importance);
+  if (fields.chunkChars !== undefined)
+    form.append("chunkChars", String(fields.chunkChars));
+  return c.upload<UploadResult>("/v1/memories/upload", form);
+};
+
 // GET /v1/memories/as-of?at=<RFC3339> — bi-temporal point-in-time view.
 export const asOf = (c: BrainSentryClient, at: string, limit = 100) =>
   c.request<{ count: number; asOf: string; memories: Memory[] }>(
