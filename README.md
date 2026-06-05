@@ -12,6 +12,7 @@
 ## Table of Contents
 
 - [Overview](#overview)
+- [Matriz de Funcionalidades](#matriz-de-funcionalidades)
 - [Architecture](#architecture)
 - [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)
@@ -36,7 +37,12 @@
 - **Audit Trail**: Rastreabilidade completa de todas as operações
 - **Interceptação de Prompts**: Injeção automática de contexto relevante com budget de tokens
 - **Modelo Cognitivo**: Decaimento temporal, spreading activation, reflexão automática, reconciliação de fatos
+- **Trust & Provenance**: Provenance tipado + trust score explicável (0-1 com razões auditáveis)
+- **Ingestão de Documentos**: Upload de txt/md/csv/json/docx convertido em memórias rastreáveis
+- **Resolução de Conflitos**: Detecção + resolução interativa (supersede/dismiss)
 - **MCP Protocol**: Integração nativa com agentes de IA via JSON-RPC 2.0 + SSE
+
+> **Visão completa**: veja a [Matriz de Funcionalidades](#matriz-de-funcionalidades) para o catálogo por área com status e requisitos.
 
 ### Problema
 
@@ -58,6 +64,95 @@
 ### Infográfico do Sistema
 
 ![Infográfico](docs/infografico.png)
+
+---
+
+## Matriz de Funcionalidades
+
+Visão consolidada do que o Brain Sentry faz hoje, por área. Status:
+✅ disponível · 🔑 requer chave de LLM/embedding · 🧩 requer FalkorDB · 🗄️ requer pgvector.
+
+### Núcleo de Memória
+
+| Funcionalidade | Status | Endpoint / Onde |
+|---|---|---|
+| CRUD de memórias | ✅ | `POST/GET/PUT/DELETE /v1/memories` |
+| Busca semântica + híbrida (BM25 + vetor + grafo + recência) | ✅ | `POST /v1/memories/search` |
+| Filtro por categoria / importância | ✅ | `/v1/memories/by-category|by-importance` |
+| Paginação | ✅ | `GET /v1/memories?page&size` |
+| Versionamento + rollback | ✅ | `/v1/memories/{id}/versions`, `/rollback` |
+| Feedback (helpful/not) | ✅ | `POST /v1/memories/{id}/feedback` |
+| Flag + review de correção | ✅ | `/v1/memories/{id}/flag|review` |
+| SimHash dedup (on-insert) | ✅ | automático |
+| Store plugável (Postgres/embedded) | ✅ | `/v1/store/memories` |
+
+### Inteligência de Memória (v0.2.0 — inspirado no comparativo memanto)
+
+| Funcionalidade | Status | Endpoint / Onde |
+|---|---|---|
+| Provenance tipado (6 níveis) | ✅ | campo `provenance` em create/response |
+| Trust score explicável (0-1 + label + razões) | ✅ | `GET /v1/memories/{id}/trust` |
+| Ingestão de documentos (txt/md/csv/json/docx) | ✅ | `POST /v1/memories/upload` |
+| Resolução interativa de conflitos | ✅ 🔑 | `POST /v1/conflicts/resolve` |
+| Detecção de conflitos / quase-duplicatas | ✅ 🔑 | `/v1/conflicts/detect|scan|near-duplicates` |
+| Benchmark de retrieval reprodutível | ✅ | `brain-sentry-explorer: npm run benchmark` |
+
+### Temporal & Bi-temporal
+
+| Funcionalidade | Status | Endpoint / Onde |
+|---|---|---|
+| Decaimento temporal por tipo | ✅ | automático |
+| Supersessão (`valid_from`/`valid_to`) | ✅ | automático + cascading staleness |
+| Consulta "as of" (ponto no tempo) | ✅ | `GET /v1/memories/as-of` |
+| Sync incremental (delta) | ✅ | `GET /v1/memories/changed-since` |
+| Export de proveniência W3C PROV-O | ✅ | `/v1/export/provenance` |
+
+### Grafo de Conhecimento
+
+| Funcionalidade | Status | Endpoint / Onde |
+|---|---|---|
+| Relacionamentos entre memórias | ✅ | `/v1/relationships` |
+| Auto-detecção de relacionamentos | ✅ 🔑 | `POST /v1/relationships/{id}/suggest` |
+| Grafo global / ego / timeline | ✅ 🧩 | `/v1/graph/*` |
+| Extração de entidades | ✅ 🔑🧩 | `/v1/entity-graph/*` |
+| Detecção de comunidades (Louvain) | ✅ 🧩 | `/v1/graph/communities` |
+| NL → Cypher | ✅ 🔑🧩 | `/v1/graph/nl-query` |
+| Spreading activation | ✅ 🧩 | `/v1/memories/activate` |
+
+### Governança & Semântica
+
+| Funcionalidade | Status | Endpoint / Onde |
+|---|---|---|
+| Decisões (auditáveis) | ✅ 🗄️ | `/v1/decisions` |
+| Políticas + enforcement | ✅ 🗄️ | `/v1/policies` |
+| Eventos | ✅ 🗄️ | `/v1/events` |
+| Raciocínio abdutivo | ✅ 🔑 | `/v1/reasoning/abduce` |
+| Audit trail completo | ✅ | `/v1/audit/*` |
+
+### Agente & Integração
+
+| Funcionalidade | Status | Endpoint / Onde |
+|---|---|---|
+| Interceptação de prompt (injeção de contexto) | ✅ 🔑 | `POST /v1/intercept` |
+| Semantic API (remember/recall/improve/forget) | ✅ | `/v1/remember`, `/v1/recall`, ... |
+| MCP (JSON-RPC 2.0 + SSE + batch) | ✅ | `/v1/mcp/*` |
+| Traces de agente | ✅ | `/v1/traces` |
+| Mesh P2P / Actions (multi-agente) | ✅ | `/v1/mesh/*`, `/v1/actions/*` |
+| Webhooks | ✅ | `/v1/webhooks` |
+| Conectores externos (GitHub/Notion/Drive) | ✅ | `/v1/connectors` |
+
+### Segurança & Operação
+
+| Funcionalidade | Status | Endpoint / Onde |
+|---|---|---|
+| Sanitizer de prompt-injection (14 patterns + framing) | ✅ | automático na injeção |
+| Trust boundaries (Local/Subagent/Remote) | ✅ | middleware |
+| PII detection + masking | ✅ | automático pré-LLM |
+| Multi-tenancy (JWT + tenant) | ✅ | middleware |
+| Fallback chain de LLM + circuit breaker | ✅ 🔑 | Anthropic > Gemini > OpenRouter |
+| Tier routing de modelos | ✅ 🔑 | `/v1/models` |
+| Diagnostics / health / version | ✅ | `/v1/diagnostics`, `/api/health`, `/api/version` |
+| Eval harness (capture/replay + cross-modal) | ✅ | `/v1/eval/*` |
 
 ---
 
@@ -173,6 +268,14 @@ brainsentry.io/
 │   │   ├── lib/                   # Utilities
 │   │   └── main.tsx
 │   ├── Dockerfile
+│   └── package.json
+│
+├── brain-sentry-explorer/         # Cliente TUI + suíte de validação E2E da API
+│   ├── src/
+│   │   ├── api/                   # Cliente HTTP tipado da API
+│   │   ├── scenarios/             # Cenários de validação (107 steps)
+│   │   ├── benchmark/             # Benchmark de retrieval reprodutível
+│   │   └── cli.tsx                # npm run validate | benchmark | start
 │   └── package.json
 │
 ├── documents/                     # Documentação do projeto
@@ -338,15 +441,29 @@ curl -H "Authorization: Bearer <token>" \
 
 | Método | Endpoint | Descrição |
 |--------|----------|-----------|
-| POST | `/v1/memories` | Criar memória |
+| POST | `/v1/memories` | Criar memória (aceita `provenance`) |
+| POST | `/v1/memories/upload` | **Ingestão de documento** (txt/md/csv/json/docx → chunks) |
 | GET | `/v1/memories` | Listar memórias (paginado) |
-| GET | `/v1/memories/{id}` | Buscar memória por ID |
+| GET | `/v1/memories/{id}` | Buscar memória por ID (inclui `trust`) |
 | PUT | `/v1/memories/{id}` | Atualizar memória |
 | DELETE | `/v1/memories/{id}` | Deletar memória |
 | POST | `/v1/memories/search` | Busca semântica + híbrida |
 | GET | `/v1/memories/by-category/{category}` | Filtrar por categoria |
 | GET | `/v1/memories/by-importance/{importance}` | Filtrar por importância |
 | POST | `/v1/memories/{id}/feedback` | Registrar feedback |
+| GET | `/v1/memories/{id}/trust` | **Trust score explicável** (0-1 + label + reasons) |
+| GET | `/v1/memories/{id}/versions` | Histórico de versões |
+| GET | `/v1/memories/as-of` | Consulta bi-temporal "as of" (ponto no tempo) |
+| GET | `/v1/memories/changed-since` | **Delta incremental** (sync de agente) |
+
+#### Conflitos
+
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| POST | `/v1/conflicts/detect/{memoryId}` | Detectar conflitos de uma memória |
+| POST | `/v1/conflicts/scan` | Varrer conflitos do tenant |
+| GET | `/v1/conflicts/near-duplicates` | Quase-duplicatas |
+| POST | `/v1/conflicts/resolve` | **Resolução interativa** (supersede/dismiss) |
 
 #### Interceptação
 
@@ -460,6 +577,12 @@ Funcionalidades avançadas inspiradas em 13 projetos open-source de memória par
 | Rerankers plugáveis | NoOp, BM25, LLM-based, HybridScore |
 | SimHash dedup | Deduplicação por Hamming distance |
 | Reflexão automática | Clustering + síntese de insights de ordem superior |
+| **Provenance tipado** | EXPLICIT/VALIDATED/CORRECTED/OBSERVED/IMPORTED/INFERRED — sinal de confiança por origem |
+| **Trust score explicável** | Confiança consolidada 0-1 + label + razões auditáveis (provenance + validação + feedback + idade + supersessão) |
+| **Sync incremental** | `changed-since` para agentes puxarem deltas (complementa `as-of`) |
+| **Ingestão de documentos** | Upload txt/md/csv/json/docx → chunking → memórias `IMPORTED` rastreáveis |
+| **Resolução de conflitos** | Interativa (supersede/dismiss), compõe com o trust score |
+| **Benchmark reprodutível** | Recall@k/Precision@k/MRR/nDCG@k contra ground-truth próprio |
 
 ---
 
@@ -625,6 +748,18 @@ curl http://localhost:8080/metrics
 - Dockerfiles
 - docker-compose (dev + production)
 - Nginx configuration
+- CI/CD: GitHub Actions → GHCR (`ghcr.io/integrall-tech/brainsentry-{backend,frontend}`)
+- Deploy: Docker Swarm via [brainsentry-devops](https://github.com/integrall-tech/brainsentry-devops)
+
+### Validação & Qualidade
+- `brain-sentry-explorer`: 107 steps de validação E2E contra API real
+- Benchmark de retrieval reprodutível (`npm run benchmark`)
+- ~50 testes unitários cobrindo trust score, ingestão, métricas e parsing
+
+### Release atual: v0.2.0
+Inteligência de memória inspirada no comparativo com o memanto:
+provenance tipado + trust score, `changed-since`, ingestão de documentos,
+resolução interativa de conflitos e benchmark reprodutível.
 
 ---
 
