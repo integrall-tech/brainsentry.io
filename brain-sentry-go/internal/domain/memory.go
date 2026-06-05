@@ -2,6 +2,8 @@ package domain
 
 import (
 	"encoding/json"
+	"math"
+	"strconv"
 	"time"
 )
 
@@ -39,6 +41,7 @@ type Memory struct {
 	DecayRate           float64          `json:"decayRate" db:"decay_rate"`
 	SupersededBy        string           `json:"supersededBy,omitempty" db:"superseded_by"`
 	RecordedAt          time.Time        `json:"recordedAt" db:"recorded_at"`
+	Provenance          Provenance       `json:"provenance,omitempty" db:"provenance"`
 }
 
 // HelpfulnessRate returns the ratio of helpful feedback.
@@ -56,4 +59,130 @@ func (m *Memory) RelevanceScore() float64 {
 	injectionScore := float64(m.InjectionCount) * 0.4
 	helpfulScore := m.HelpfulnessRate() * 0.3
 	return accessScore + injectionScore + helpfulScore
+}
+
+// TrustReport is a consolidated, explainable confidence assessment for a
+// memory. Score is the single number a consumer can rank/threshold on;
+// Label buckets it for display; Reasons lists the factors that moved the
+// score so the verdict is auditable rather than a black box.
+type TrustReport struct {
+	Score   float64  `json:"score"`   // 0.0 (do not trust) .. 1.0 (fully trusted)
+	Label   string   `json:"label"`   // "high" | "medium" | "low"
+	Reasons []string `json:"reasons"` // human-readable factors, highest-impact first
+}
+
+// TrustScore blends the signals brain-sentry already tracks — provenance,
+// validation status, feedback, age and supersession — into one auditable
+// confidence figure. It is a PURE function of the memory + a clock, so it
+// is fully unit-testable without a database.
+//
+// Pipeline: start from provenance base trust, then apply additive
+// adjustments, then hard caps (a superseded memory can never be "high"),
+// then clamp to [0,1].
+func (m *Memory) TrustScore(now time.Time) TrustReport {
+	reasons := make([]string, 0, 5)
+
+	// 1. Base trust from provenance.
+	prov := m.Provenance
+	score := prov.BaseTrust()
+	if prov == "" {
+		reasons = append(reasons, "provenance unknown (neutral base 0.50)")
+	} else {
+		reasons = append(reasons, "provenance "+string(prov)+" (base "+formatScore(prov.BaseTrust())+")")
+	}
+
+	// 2. Validation status adjustment. APPROVED/FLAGGED nudge additively;
+	//    REJECTED is a human verdict of "this is wrong", so it's applied
+	//    as a hard cap further down rather than a nudge that a high base
+	//    could survive.
+	switch m.ValidationStatus {
+	case ValidationApproved:
+		score += 0.10
+		reasons = append(reasons, "validation APPROVED (+0.10)")
+	case ValidationFlagged:
+		score -= 0.20
+		reasons = append(reasons, "validation FLAGGED (-0.20)")
+	}
+
+	// 3. Feedback adjustment — only when there's enough signal to matter.
+	if total := m.HelpfulCount + m.NotHelpfulCount; total >= 2 {
+		// Map helpfulness rate [0,1] to a [-0.15,+0.15] swing.
+		delta := (m.HelpfulnessRate() - 0.5) * 0.30
+		score += delta
+		if delta >= 0 {
+			reasons = append(reasons, "positive feedback (+"+formatScore(delta)+")")
+		} else {
+			reasons = append(reasons, "negative feedback ("+formatScore(delta)+")")
+		}
+	}
+
+	// 4. Age decay — unvalidated memories lose a little trust as they age,
+	//    on a gentle half-life of ~180 days. Validated/approved memories
+	//    are exempt: a confirmed fact doesn't rot just because it's old.
+	validated := m.Provenance == ProvenanceValidated || m.ValidationStatus == ValidationApproved
+	if !validated {
+		ref := m.RecordedAt
+		if ref.IsZero() {
+			ref = m.CreatedAt
+		}
+		if !ref.IsZero() {
+			ageDays := now.Sub(ref).Hours() / 24.0
+			if ageDays > 0 {
+				const halfLifeDays = 180.0
+				ageFactor := math.Pow(0.5, ageDays/halfLifeDays) // 1.0 → 0.5 over 180d
+				penalty := score * (1 - ageFactor) * 0.30        // at most -30% of score
+				if penalty > 0.001 {
+					score -= penalty
+					reasons = append(reasons, "age decay ("+formatScore(-penalty)+")")
+				}
+			}
+		}
+	}
+
+	// 5. Hard caps — verdicts that no positive base should survive.
+	//    A rejected memory was reviewed and found wrong; a superseded one
+	//    is stale by definition. Both floor the score regardless of
+	//    everything above.
+	if m.ValidationStatus == ValidationRejected {
+		if score > 0.20 {
+			score = 0.20
+		}
+		reasons = append(reasons, "validation REJECTED — capped at 0.20")
+	}
+	if m.SupersededBy != "" {
+		if score > 0.30 {
+			score = 0.30
+		}
+		reasons = append(reasons, "superseded — capped at 0.30")
+	}
+
+	// Clamp.
+	if score < 0 {
+		score = 0
+	} else if score > 1 {
+		score = 1
+	}
+
+	return TrustReport{
+		Score:   score,
+		Label:   trustLabel(score),
+		Reasons: reasons,
+	}
+}
+
+func trustLabel(score float64) string {
+	switch {
+	case score >= 0.70:
+		return "high"
+	case score >= 0.40:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+// formatScore renders a score delta with 2 decimals and a sign, for the
+// human-readable Reasons list (e.g. "+0.10", "-0.40", "0.80").
+func formatScore(v float64) string {
+	return strconv.FormatFloat(v, 'f', 2, 64)
 }

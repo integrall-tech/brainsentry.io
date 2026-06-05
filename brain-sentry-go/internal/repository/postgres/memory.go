@@ -30,7 +30,8 @@ const memoryColumns = `id, content, summary, category, importance, validation_st
 	embedding, metadata, source_type, source_reference, created_by, tenant_id,
 	created_at, updated_at, last_accessed_at, version, access_count, injection_count,
 	helpful_count, not_helpful_count, code_example, programming_language, memory_type, deleted_at,
-	emotional_weight, sim_hash, valid_from, valid_to, decay_rate, superseded_by, recorded_at`
+	emotional_weight, sim_hash, valid_from, valid_to, decay_rate, superseded_by, recorded_at,
+	provenance`
 
 func scanMemory(row pgx.Row) (*domain.Memory, error) {
 	var m domain.Memory
@@ -40,6 +41,7 @@ func scanMemory(row pgx.Row) (*domain.Memory, error) {
 		&m.CreatedAt, &m.UpdatedAt, &m.LastAccessedAt, &m.Version, &m.AccessCount, &m.InjectionCount,
 		&m.HelpfulCount, &m.NotHelpfulCount, &m.CodeExample, &m.ProgrammingLanguage, &m.MemoryType, &m.DeletedAt,
 		&m.EmotionalWeight, &m.SimHash, &m.ValidFrom, &m.ValidTo, &m.DecayRate, &m.SupersededBy, &m.RecordedAt,
+		&m.Provenance,
 	)
 	if err != nil {
 		return nil, err
@@ -57,6 +59,7 @@ func scanMemories(rows pgx.Rows) ([]domain.Memory, error) {
 			&m.CreatedAt, &m.UpdatedAt, &m.LastAccessedAt, &m.Version, &m.AccessCount, &m.InjectionCount,
 			&m.HelpfulCount, &m.NotHelpfulCount, &m.CodeExample, &m.ProgrammingLanguage, &m.MemoryType, &m.DeletedAt,
 			&m.EmotionalWeight, &m.SimHash, &m.ValidFrom, &m.ValidTo, &m.DecayRate, &m.SupersededBy, &m.RecordedAt,
+			&m.Provenance,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning memory: %w", err)
@@ -92,7 +95,7 @@ func (r *MemoryRepository) Create(ctx context.Context, m *domain.Memory) error {
 	if m.RecordedAt.IsZero() {
 		m.RecordedAt = now
 	}
-	query := fmt.Sprintf(`INSERT INTO memories (%s) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)`, memoryColumns)
+	query := fmt.Sprintf(`INSERT INTO memories (%s) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)`, memoryColumns)
 
 	_, err = tx.Exec(ctx, query,
 		m.ID, m.Content, m.Summary, m.Category, m.Importance, m.ValidationStatus,
@@ -100,6 +103,7 @@ func (r *MemoryRepository) Create(ctx context.Context, m *domain.Memory) error {
 		m.CreatedAt, m.UpdatedAt, m.LastAccessedAt, m.Version, m.AccessCount, m.InjectionCount,
 		m.HelpfulCount, m.NotHelpfulCount, m.CodeExample, m.ProgrammingLanguage, m.MemoryType, m.DeletedAt,
 		m.EmotionalWeight, m.SimHash, m.ValidFrom, m.ValidTo, m.DecayRate, m.SupersededBy, m.RecordedAt,
+		m.Provenance,
 	)
 	if err != nil {
 		return fmt.Errorf("inserting memory: %w", err)

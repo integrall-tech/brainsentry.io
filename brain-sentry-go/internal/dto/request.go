@@ -30,6 +30,7 @@ type CreateMemoryRequest struct {
 	EmotionalWeight     *float64               `json:"emotionalWeight,omitempty"`
 	ValidFrom           *time.Time             `json:"validFrom,omitempty"`
 	ValidTo             *time.Time             `json:"validTo,omitempty"`
+	Provenance          domain.Provenance      `json:"provenance,omitempty"`
 }
 
 // FlagMemoryRequest represents a request to flag a memory as incorrect.

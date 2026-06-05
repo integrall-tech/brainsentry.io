@@ -56,6 +56,8 @@ type MemoryResponse struct {
 	DecayRate           float64                 `json:"decayRate"`
 	SupersededBy        string                  `json:"supersededBy,omitempty"`
 	DecayedRelevance    float64                 `json:"decayedRelevance"`
+	Provenance          domain.Provenance       `json:"provenance,omitempty"`
+	Trust               *domain.TrustReport     `json:"trust,omitempty"`
 	ScoreTrace          *ScoreTraceResponse     `json:"scoreTrace,omitempty"`
 	RelatedMemories     []RelatedMemoryRef      `json:"relatedMemories,omitempty"`
 }

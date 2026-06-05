@@ -272,6 +272,16 @@ func (s *MemoryService) CreateMemory(ctx context.Context, req dto.CreateMemoryRe
 		m.ValidTo = req.ValidTo
 	}
 
+	// Provenance: honor a valid value from the request; otherwise default
+	// to EXPLICIT, since a direct POST /v1/memories is the caller stating
+	// the memory outright. Invalid values fall back to EXPLICIT too rather
+	// than persisting garbage.
+	if req.Provenance.IsValid() {
+		m.Provenance = req.Provenance
+	} else {
+		m.Provenance = domain.ProvenanceExplicit
+	}
+
 	// Check for temporal supersession: if a similar memory with same subject exists, supersede it
 	if m.SimHash != "" {
 		if existingHashes, err := s.memoryRepo.FindSimHashes(ctx); err == nil {
