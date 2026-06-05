@@ -4,11 +4,13 @@
 
 import { memoryScenarios } from "./memory-scenarios.js";
 import { salesScenarios } from "./sales-scenarios.js";
+import { trustScenarios } from "./trust-scenarios.js";
 import type { Scenario } from "./runner.js";
 
-export { memoryScenarios, salesScenarios };
+export { memoryScenarios, salesScenarios, trustScenarios };
 
 export const allScenarios: Scenario[] = [
   ...memoryScenarios,
   ...salesScenarios,
+  ...trustScenarios,
 ];

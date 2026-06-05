@@ -1,16 +1,16 @@
 #!/usr/bin/env tsx
 // Entry point. `--validate` runs the headless validation suite and exits
 // with its status; otherwise the interactive TUI is rendered.
-
-import { render } from "ink";
-import { BrainSentryClient } from "./api/client.js";
-import { App } from "./components/App.js";
-import { loadConfig } from "./config.js";
-import { runHeadless } from "./validate.js";
+//
+// The ink TUI (and its `render`/App imports) are loaded LAZILY, only on
+// the interactive path. The headless `--validate` mode is what CI and
+// smoke-test.sh use — it must run even if the TUI deps (ink) aren't
+// fully installed, so we never import ink at module top level.
 
 const args = process.argv.slice(2);
 
 if (args.includes("--validate")) {
+  const { runHeadless } = await import("./validate.js");
   runHeadless()
     .then((code) => process.exit(code))
     .catch((err) => {
@@ -26,6 +26,9 @@ if (args.includes("--validate")) {
   );
   process.exit(0);
 } else {
-  const client = new BrainSentryClient(loadConfig());
-  render(<App client={client} />);
+  const { render } = await import("ink");
+  const { App } = await import("./components/App.js");
+  const { BrainSentryClient } = await import("./api/client.js");
+  const { loadConfig } = await import("./config.js");
+  render(<App client={new BrainSentryClient(loadConfig())} />);
 }

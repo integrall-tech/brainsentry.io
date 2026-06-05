@@ -84,6 +84,17 @@ export const feedbackWeightSchema = z
   })
   .passthrough();
 
+// Trust assessment returned by GET /v1/memories/{id}/trust and embedded
+// in the memory response under `trust`.
+export const trustReportSchema = z
+  .object({
+    score: z.number(),
+    label: z.enum(["high", "medium", "low"]),
+    reasons: z.array(z.string()),
+  })
+  .passthrough();
+export type TrustReport = z.infer<typeof trustReportSchema>;
+
 export const relationshipSchema = z
   .object({
     id: z.string().optional(),
@@ -96,6 +107,14 @@ export const relationshipSchema = z
 
 // --- Request shapes ---
 
+export type Provenance =
+  | "EXPLICIT"
+  | "VALIDATED"
+  | "CORRECTED"
+  | "OBSERVED"
+  | "IMPORTED"
+  | "INFERRED";
+
 export interface CreateMemoryRequest {
   content: string;
   summary?: string;
@@ -104,6 +123,7 @@ export interface CreateMemoryRequest {
   memoryType?: MemoryType;
   tags?: string[];
   metadata?: Record<string, unknown>;
+  provenance?: Provenance;
 }
 
 export interface UpdateMemoryRequest {

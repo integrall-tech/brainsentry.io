@@ -12,6 +12,7 @@ import type {
   MemoryList,
   SearchRequest,
   SearchResponse,
+  TrustReport,
   UpdateMemoryRequest,
 } from "./types.js";
 
@@ -22,6 +23,10 @@ export const createMemory = (c: BrainSentryClient, body: CreateMemoryRequest) =>
 
 export const getMemory = (c: BrainSentryClient, id: string) =>
   c.request<Memory>("GET", `/v1/memories/${id}`);
+
+// GET /v1/memories/{id}/trust — the standalone consolidated trust report.
+export const getTrust = (c: BrainSentryClient, id: string) =>
+  c.request<TrustReport>("GET", `/v1/memories/${id}/trust`);
 
 export const listMemories = (c: BrainSentryClient, page = 0, size = 20) =>
   c.request<MemoryList>("GET", "/v1/memories", { query: { page, size } });
