@@ -123,7 +123,12 @@ func (h *MemoryHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		DecayRate:           m.DecayRate,
 		SupersededBy:        m.SupersededBy,
 		DecayedRelevance:    service.ComputeDecayedRelevance(m, time.Now()),
+		Provenance:          m.Provenance,
 	}
+	// Attach the consolidated trust assessment so a single GET tells the
+	// caller both what the memory is and how much to trust it.
+	trust := m.TrustScore(time.Now())
+	resp.Trust = &trust
 
 	// Populate related memories if relationship service is available
 	if h.relationshipService != nil {
@@ -313,4 +318,18 @@ func (h *MemoryHandler) Feedback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "feedback recorded"})
+}
+
+// Trust handles GET /v1/memories/{id}/trust — returns just the
+// consolidated, explainable trust assessment for a memory. Lighter than
+// fetching the whole memory via GetByID when a caller only needs to
+// decide "should I rely on this?".
+func (h *MemoryHandler) Trust(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	m, err := h.memoryService.GetMemory(r.Context(), id)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, m.TrustScore(time.Now()))
 }

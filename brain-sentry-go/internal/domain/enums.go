@@ -38,6 +38,61 @@ const (
 	ValidationRejected ValidationStatus = "REJECTED"
 )
 
+// Provenance describes HOW a memory came to be known, which is the
+// strongest single signal for how much to trust it. Modelled after the
+// provenance taxonomy popularised by agent-memory systems: a directly
+// stated fact is trusted more than something merely inferred from
+// context. Feeds Memory.TrustScore().
+type Provenance string
+
+const (
+	// ProvenanceExplicit — the user/agent stated this directly. High base trust.
+	ProvenanceExplicit Provenance = "EXPLICIT"
+	// ProvenanceValidated — independently confirmed (cross-checked, approved).
+	ProvenanceValidated Provenance = "VALIDATED"
+	// ProvenanceCorrected — rewritten after a contradiction was resolved.
+	ProvenanceCorrected Provenance = "CORRECTED"
+	// ProvenanceObserved — seen in the agent's actions/traces, not stated.
+	ProvenanceObserved Provenance = "OBSERVED"
+	// ProvenanceImported — ingested from an external source (file, API, sync).
+	ProvenanceImported Provenance = "IMPORTED"
+	// ProvenanceInferred — derived/guessed from surrounding context. Low base trust.
+	ProvenanceInferred Provenance = "INFERRED"
+)
+
+// IsValid reports whether p is one of the known provenance values.
+func (p Provenance) IsValid() bool {
+	switch p {
+	case ProvenanceExplicit, ProvenanceValidated, ProvenanceCorrected,
+		ProvenanceObserved, ProvenanceImported, ProvenanceInferred:
+		return true
+	default:
+		return false
+	}
+}
+
+// BaseTrust returns the starting confidence [0,1] implied by provenance
+// alone, before age / validation / feedback adjustments. An empty or
+// unknown provenance falls back to a neutral 0.5.
+func (p Provenance) BaseTrust() float64 {
+	switch p {
+	case ProvenanceValidated:
+		return 0.90
+	case ProvenanceExplicit:
+		return 0.80
+	case ProvenanceCorrected:
+		return 0.75
+	case ProvenanceObserved:
+		return 0.60
+	case ProvenanceImported:
+		return 0.50
+	case ProvenanceInferred:
+		return 0.40
+	default:
+		return 0.50
+	}
+}
+
 // RelationshipType represents memory relationship types.
 type RelationshipType string
 

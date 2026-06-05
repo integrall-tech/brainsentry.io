@@ -907,6 +907,7 @@ func main() {
 			r.Put("/{id}", memoryHandler.Update)
 			r.Delete("/{id}", memoryHandler.Delete)
 			r.Get("/{id}/versions", memoryHandler.Versions)
+			r.Get("/{id}/trust", memoryHandler.Trust)
 			r.Post("/{id}/feedback", memoryHandler.Feedback)
 			r.Post("/{id}/flag", correctionHandler.Flag)
 			r.Post("/{id}/review", correctionHandler.Review)

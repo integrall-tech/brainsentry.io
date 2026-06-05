@@ -25,8 +25,9 @@ func TestMemoryColumns_ContainsSimHash(t *testing.T) {
 }
 
 func TestMemoryColumns_HasCorrectCount(t *testing.T) {
-	// 31 columns total: original set + temporal decay/supersession + bi-temporal recorded_at
-	expected := 31
+	// 32 columns total: original set + temporal decay/supersession +
+	// bi-temporal recorded_at + provenance (migration 000010).
+	expected := 32
 	count := countColumns(memoryColumns)
 	if count != expected {
 		t.Errorf("expected %d columns, got %d", expected, count)
