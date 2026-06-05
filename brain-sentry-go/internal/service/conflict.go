@@ -203,6 +203,74 @@ Respond with JSON only:
 	}, nil
 }
 
+// ResolutionAction is a human verdict on a detected conflict pair.
+type ResolutionAction string
+
+const (
+	// ResolveSupersede — keep the winner, mark the loser superseded by it.
+	// The loser's trust score then caps at 0.30; the winner is promoted to
+	// CORRECTED provenance (confirmed after resolving a contradiction).
+	ResolveSupersede ResolutionAction = "supersede"
+	// ResolveDismiss — the pair is NOT actually a conflict; keep both
+	// untouched. Records the human decision without mutating either memory.
+	ResolveDismiss ResolutionAction = "dismiss"
+)
+
+// ParseResolutionAction validates a raw action string. Pure + testable.
+func ParseResolutionAction(s string) (ResolutionAction, error) {
+	switch ResolutionAction(s) {
+	case ResolveSupersede:
+		return ResolveSupersede, nil
+	case ResolveDismiss:
+		return ResolveDismiss, nil
+	default:
+		return "", fmt.Errorf("invalid action %q (want supersede|dismiss)", s)
+	}
+}
+
+// ResolveConflict applies a human resolution to a conflicting pair.
+//   - supersede: loser.superseded_by = winner; winner.provenance = CORRECTED
+//   - dismiss:   both kept untouched (decision recorded by the caller)
+//
+// Both memories must exist in the tenant. winner != loser.
+func (s *ConflictService) ResolveConflict(ctx context.Context, winnerID, loserID string, action ResolutionAction) error {
+	if winnerID == "" || loserID == "" {
+		return fmt.Errorf("winnerId and loserId are required")
+	}
+	if winnerID == loserID {
+		return fmt.Errorf("winnerId and loserId must differ")
+	}
+	winner, err := s.memoryRepo.FindByID(ctx, winnerID)
+	if err != nil {
+		return fmt.Errorf("winner not found: %w", err)
+	}
+	if _, err := s.memoryRepo.FindByID(ctx, loserID); err != nil {
+		return fmt.Errorf("loser not found: %w", err)
+	}
+
+	switch action {
+	case ResolveDismiss:
+		// No state change — both memories stay active. The audit of the
+		// decision is the caller's responsibility (handler logs it).
+		return nil
+	case ResolveSupersede:
+		if err := s.memoryRepo.SupersedeMemory(ctx, loserID, winnerID); err != nil {
+			return fmt.Errorf("superseding loser: %w", err)
+		}
+		// Promote the surviving memory: it was confirmed correct against a
+		// contradiction — exactly what CORRECTED provenance means. Don't
+		// downgrade an already-VALIDATED memory, though.
+		if winner.Provenance != domain.ProvenanceValidated {
+			if err := s.memoryRepo.SetProvenance(ctx, winnerID, domain.ProvenanceCorrected); err != nil {
+				return fmt.Errorf("promoting winner provenance: %w", err)
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("unhandled action %q", action)
+	}
+}
+
 func contentForAnalysis(m *domain.Memory) string {
 	text := m.Content
 	if len(text) > 500 {

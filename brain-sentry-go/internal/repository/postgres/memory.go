@@ -619,6 +619,22 @@ func (r *MemoryRepository) BoostAccessCount(ctx context.Context, id string, boos
 }
 
 // SupersedeMemory marks an existing memory as superseded by a new one.
+// SetProvenance updates just the provenance of a memory (and bumps
+// updated_at so changed-since picks it up). Used when a resolution
+// promotes a surviving memory to CORRECTED.
+func (r *MemoryRepository) SetProvenance(ctx context.Context, id string, prov domain.Provenance) error {
+	tenantID := tenant.FromContext(ctx)
+	now := time.Now()
+	_, err := r.pool.Exec(ctx,
+		`UPDATE memories SET provenance = $1, updated_at = $2
+		WHERE id = $3 AND tenant_id = $4 AND deleted_at IS NULL`,
+		string(prov), now, id, tenantID)
+	if err != nil {
+		return fmt.Errorf("setting provenance: %w", err)
+	}
+	return nil
+}
+
 func (r *MemoryRepository) SupersedeMemory(ctx context.Context, oldID, newID string) error {
 	tenantID := tenant.FromContext(ctx)
 	now := time.Now()
