@@ -57,6 +57,17 @@ export const uploadFile = (
   return c.upload<UploadResult>("/v1/memories/upload", form);
 };
 
+// POST /v1/conflicts/resolve — apply a human verdict to a conflict pair.
+export const resolveConflict = (
+  c: BrainSentryClient,
+  winnerId: string,
+  loserId: string,
+  action: "supersede" | "dismiss",
+) =>
+  c.request("POST", "/v1/conflicts/resolve", {
+    body: { winnerId, loserId, action },
+  });
+
 // GET /v1/memories/as-of?at=<RFC3339> — bi-temporal point-in-time view.
 export const asOf = (c: BrainSentryClient, at: string, limit = 100) =>
   c.request<{ count: number; asOf: string; memories: Memory[] }>(

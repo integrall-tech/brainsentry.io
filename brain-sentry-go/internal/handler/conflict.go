@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -77,5 +78,40 @@ func (h *ConflictHandler) NearDuplicates(w http.ResponseWriter, r *http.Request)
 		"threshold": threshold,
 		"count":     len(pairs),
 		"pairs":     pairs,
+	})
+}
+
+// Resolve handles POST /v1/conflicts/resolve — applies a human verdict to
+// a conflicting pair. Body:
+//
+//	{ "winnerId": "...", "loserId": "...", "action": "supersede"|"dismiss" }
+//
+// supersede marks the loser superseded by the winner (and promotes the
+// winner to CORRECTED provenance); dismiss keeps both. This is the
+// interactive counterpart to the (automatic) detection endpoints.
+func (h *ConflictHandler) Resolve(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		WinnerID string `json:"winnerId"`
+		LoserID  string `json:"loserId"`
+		Action   string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	action, err := service.ParseResolutionAction(req.Action)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.conflictService.ResolveConflict(r.Context(), req.WinnerID, req.LoserID, action); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"winnerId": req.WinnerID,
+		"loserId":  req.LoserID,
+		"action":   action,
+		"resolved": true,
 	})
 }

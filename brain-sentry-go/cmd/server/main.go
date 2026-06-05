@@ -1001,6 +1001,7 @@ func main() {
 			r.Post("/detect/{memoryId}", conflictHandler.DetectForMemory)
 			r.Post("/scan", conflictHandler.ScanAll)
 			r.Get("/near-duplicates", conflictHandler.NearDuplicates)
+			r.Post("/resolve", conflictHandler.Resolve)
 		})
 
 		// Webhooks

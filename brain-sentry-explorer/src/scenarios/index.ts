@@ -7,6 +7,7 @@ import { salesScenarios } from "./sales-scenarios.js";
 import { trustScenarios } from "./trust-scenarios.js";
 import { temporalScenarios } from "./temporal-scenarios.js";
 import { ingestScenarios } from "./ingest-scenarios.js";
+import { conflictScenarios } from "./conflict-scenarios.js";
 import type { Scenario } from "./runner.js";
 
 export {
@@ -15,6 +16,7 @@ export {
   trustScenarios,
   temporalScenarios,
   ingestScenarios,
+  conflictScenarios,
 };
 
 export const allScenarios: Scenario[] = [
@@ -23,4 +25,5 @@ export const allScenarios: Scenario[] = [
   ...trustScenarios,
   ...temporalScenarios,
   ...ingestScenarios,
+  ...conflictScenarios,
 ];
