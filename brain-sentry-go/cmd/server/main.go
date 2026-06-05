@@ -1217,6 +1217,7 @@ func main() {
 
 		// Semantica: Bi-temporal memory query
 		r.Get("/v1/memories/as-of", biTemporalHandler.AsOf)
+		r.Get("/v1/memories/changed-since", biTemporalHandler.ChangedSince)
 
 		// Semantica: Coreference resolution (used before extraction)
 		r.Post("/v1/extract/resolve-coreferences", coreferenceHandler.Resolve)

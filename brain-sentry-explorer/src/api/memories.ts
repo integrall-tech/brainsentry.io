@@ -28,6 +28,22 @@ export const getMemory = (c: BrainSentryClient, id: string) =>
 export const getTrust = (c: BrainSentryClient, id: string) =>
   c.request<TrustReport>("GET", `/v1/memories/${id}/trust`);
 
+// GET /v1/memories/as-of?at=<RFC3339> — bi-temporal point-in-time view.
+export const asOf = (c: BrainSentryClient, at: string, limit = 100) =>
+  c.request<{ count: number; asOf: string; memories: Memory[] }>(
+    "GET",
+    "/v1/memories/as-of",
+    { query: { at, limit } },
+  );
+
+// GET /v1/memories/changed-since?since=<RFC3339> — incremental delta.
+export const changedSince = (c: BrainSentryClient, since: string, limit = 100) =>
+  c.request<{ count: number; since: string; memories: Memory[] }>(
+    "GET",
+    "/v1/memories/changed-since",
+    { query: { since, limit } },
+  );
+
 export const listMemories = (c: BrainSentryClient, page = 0, size = 20) =>
   c.request<MemoryList>("GET", "/v1/memories", { query: { page, size } });
 

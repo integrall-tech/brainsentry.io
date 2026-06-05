@@ -717,6 +717,33 @@ func (r *MemoryRepository) FindAsOf(ctx context.Context, asOf time.Time, limit i
 	return scanMemories(rows)
 }
 
+// FindChangedSince returns memories created OR updated at/after `since`,
+// newest change first. The complement of FindAsOf: where as-of answers
+// "how did the world look at instant T", changed-since answers "what
+// moved since I last synced at T" — the query an agent runs to pull an
+// incremental delta instead of re-reading everything.
+//
+// "Changed" means updated_at >= since (updated_at is bumped on create and
+// on every edit, so this captures both new and modified memories).
+func (r *MemoryRepository) FindChangedSince(ctx context.Context, since time.Time, limit int) ([]domain.Memory, error) {
+	tenantID := tenant.FromContext(ctx)
+	if limit <= 0 {
+		limit = 100
+	}
+	query := fmt.Sprintf(`SELECT %s FROM memories
+		WHERE tenant_id = $1
+		  AND deleted_at IS NULL
+		  AND updated_at >= $2
+		ORDER BY updated_at DESC
+		LIMIT $3`, memoryColumns)
+	rows, err := r.pool.Query(ctx, query, tenantID, since, limit)
+	if err != nil {
+		return nil, fmt.Errorf("finding changed-since memories: %w", err)
+	}
+	defer rows.Close()
+	return scanMemories(rows)
+}
+
 // MemoryToJSON converts metadata to JSON for storage.
 func MemoryToJSON(data map[string]any) json.RawMessage {
 	if data == nil {
