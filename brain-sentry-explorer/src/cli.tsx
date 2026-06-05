@@ -17,6 +17,14 @@ if (args.includes("--validate")) {
       process.stderr.write(`${err instanceof Error ? err.stack : err}\n`);
       process.exit(1);
     });
+} else if (args.includes("--benchmark")) {
+  const { runBenchmarkCLI } = await import("./benchmark/runner.js");
+  runBenchmarkCLI()
+    .then((code) => process.exit(code))
+    .catch((err) => {
+      process.stderr.write(`${err instanceof Error ? err.stack : err}\n`);
+      process.exit(1);
+    });
 } else if (args.includes("--help") || args.includes("-h")) {
   process.stdout.write(
     "brain-sentry-explorer — example client for the brainsentry.io memory API\n\n" +

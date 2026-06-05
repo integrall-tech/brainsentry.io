@@ -84,6 +84,27 @@ passes, non-zero otherwise. The suite seeds its own data (content
 prefixed `[bs-explorer]`) and deletes it in a cleanup step, so it is
 safe to re-run and leaves the backend clean.
 
+### Retrieval benchmark
+
+```bash
+npm run benchmark
+```
+
+A reproducible measurement of search quality against a known ground
+truth: it seeds the sales-CRM corpus, runs a fixed query set whose
+relevant memories are known by construction, and reports aggregate
+**Recall@k / Precision@k / MRR / nDCG@k**.
+
+This is a brain-sentry-owned dataset + ground truth — **not**
+LongMemEval or LoCoMo (those need external vendor datasets and an LLM
+judge). The numbers are honest for the LLM + embedding backend printed
+in the header; with the hash-embedding fallback (no embedding API key)
+purely-semantic queries score lower than they would with a real
+embedding provider. Re-run after changing the backend to compare.
+
+Pure metric functions live in `src/benchmark/metrics.ts` and are unit
+tested (`npm test`, node:test via tsx — no backend needed).
+
 ## Layout
 
 ```
