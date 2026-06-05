@@ -90,6 +90,65 @@ export class BrainSentryClient {
     return call;
   }
 
+  // upload sends a multipart/form-data POST. Kept separate from request()
+  // because that path forces a JSON Content-Type; here we hand axios a
+  // FormData and let it set the multipart boundary itself. Shares the
+  // same 429 backoff retry as request().
+  async upload<T = unknown>(
+    path: string,
+    form: FormData,
+  ): Promise<ApiCall<T>> {
+    const maxAttempts = 5;
+    let call = await this.doUpload<T>(path, form);
+    for (let attempt = 1; attempt < maxAttempts && call.status === 429; attempt++) {
+      await new Promise((r) => setTimeout(r, 500 * 2 ** (attempt - 1)));
+      call = await this.doUpload<T>(path, form);
+    }
+    return call;
+  }
+
+  private async doUpload<T>(path: string, form: FormData): Promise<ApiCall<T>> {
+    const headers: Record<string, string> = {
+      "X-Tenant-ID": this.config.tenantId,
+    };
+    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+    const started = performance.now();
+    let call: ApiCall<T>;
+    try {
+      const res = await this.http.request({
+        method: "POST",
+        url: path,
+        headers,
+        data: form,
+      });
+      const ms = Math.round(performance.now() - started);
+      const ok = res.status >= 200 && res.status < 300;
+      call = {
+        method: "POST",
+        path,
+        status: res.status,
+        ok,
+        ms,
+        data: res.data as T,
+        error: ok ? undefined : extractError(res.data, res.status),
+        at: Date.now(),
+      };
+    } catch (err) {
+      call = {
+        method: "POST",
+        path,
+        status: 0,
+        ok: false,
+        ms: Math.round(performance.now() - started),
+        error: describeTransportError(err),
+        at: Date.now(),
+      };
+    }
+    this.calls.push(call);
+    if (this.calls.length > 200) this.calls.shift();
+    return call;
+  }
+
   private async doRequest<T>(
     method: HttpMethod,
     path: string,

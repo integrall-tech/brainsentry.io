@@ -899,6 +899,7 @@ func main() {
 		// Memories
 		r.Route("/v1/memories", func(r chi.Router) {
 			r.Post("/", memoryHandler.Create)
+			r.Post("/upload", memoryHandler.Upload)
 			r.Get("/", memoryHandler.List)
 			r.Post("/search", memoryHandler.Search)
 			r.Get("/by-category/{category}", memoryHandler.GetByCategory)
