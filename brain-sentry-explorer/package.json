@@ -11,6 +11,8 @@
     "start": "tsx src/cli.tsx",
     "explore": "tsx src/cli.tsx",
     "validate": "tsx src/cli.tsx --validate",
+    "benchmark": "tsx src/cli.tsx --benchmark",
+    "test": "tsx --test src/**/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
