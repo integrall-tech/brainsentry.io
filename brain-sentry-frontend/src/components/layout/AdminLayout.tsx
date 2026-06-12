@@ -47,6 +47,7 @@ import {
   PanelLeftOpen,
   Stethoscope,
   Cpu,
+  LogOut,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -159,7 +160,12 @@ export function AdminLayout() {
   const [collapsed, setCollapsed] = useState<boolean>(() => loadSidebarCollapsed());
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login");
+  };
 
   const navigation = useMemo<NavEntry[]>(
     () => [
@@ -516,6 +522,16 @@ export function AdminLayout() {
             <div className="flex flex-col items-center gap-1">
               <LanguageSwitcher />
               <ThemeSelector />
+              <button
+                type="button"
+                data-testid="sidebar-logout"
+                onClick={handleLogout}
+                aria-label={t("auth.logout")}
+                title={t("auth.logout")}
+                className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-destructive transition-colors"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
             </div>
           ) : (
             <>
@@ -524,6 +540,16 @@ export function AdminLayout() {
                 <div className="flex items-center gap-1">
                   <LanguageSwitcher />
                   <ThemeSelector />
+                  <button
+                    type="button"
+                    data-testid="sidebar-logout"
+                    onClick={handleLogout}
+                    aria-label={t("auth.logout")}
+                    title={t("auth.logout")}
+                    className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-destructive transition-colors"
+                  >
+                    <LogOut className="h-4 w-4" />
+                  </button>
                 </div>
               </div>
               <div className="text-xs text-muted-foreground mt-1">
@@ -555,6 +581,17 @@ export function AdminLayout() {
             <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto">
               {renderNavTree(() => setMobileMenuOpen(false), true)}
             </nav>
+            <div className="border-t p-4">
+              <button
+                type="button"
+                data-testid="mobile-logout"
+                onClick={handleLogout}
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-destructive transition-colors"
+              >
+                <LogOut className="h-4 w-4" />
+                {t("auth.logout")}
+              </button>
+            </div>
           </div>
         </div>
       )}

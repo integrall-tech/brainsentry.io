@@ -213,6 +213,60 @@ export async function mockAdminApis(page: Page) {
   const memories = baseMemories();
   const users = baseUsers();
   const tenants = baseTenants();
+
+  // Governance seeds (Decisions / Policies / Events)
+  const decisionSeed = {
+    id: "dec-001",
+    tenantId: DEFAULT_TENANT_ID,
+    category: "deployment",
+    scenario: "Canary release do serviço de busca",
+    reasoning: "Reduzir blast radius em produção",
+    outcome: "approved",
+    confidence: 0.82,
+    createdAt: "2026-04-15T10:00:00.000Z",
+    recordedAt: "2026-04-15T10:00:00.000Z",
+  };
+
+  let policies = [
+    {
+      id: "pol-1",
+      tenantId: DEFAULT_TENANT_ID,
+      name: "Confiança mínima",
+      description: "Decisões precisam de confiança >= 0.7",
+      category: "*",
+      severity: "warning",
+      ruleType: "min_confidence",
+      ruleConfig: { min: 0.7 },
+      enabled: true,
+      createdAt: "2026-04-14T09:00:00.000Z",
+      updatedAt: "2026-04-14T09:00:00.000Z",
+      version: 1,
+    },
+  ];
+
+  let events = [
+    {
+      id: "evt-1",
+      tenantId: DEFAULT_TENANT_ID,
+      eventType: "deploy",
+      title: "Deploy do backend v2",
+      description: "Rollout gradual com canary em produção.",
+      occurredAt: "2026-04-14T18:00:00.000Z",
+      participants: [{ entityId: "ent-backend" }],
+      createdAt: "2026-04-14T18:05:00.000Z",
+    },
+    {
+      id: "evt-2",
+      tenantId: DEFAULT_TENANT_ID,
+      eventType: "incident",
+      title: "Incidente de latência",
+      description: "p95 acima do SLO por 20 minutos.",
+      occurredAt: "2026-04-13T11:00:00.000Z",
+      participants: [],
+      createdAt: "2026-04-13T11:30:00.000Z",
+    },
+  ];
+
   let webhooks = [
     {
       id: "wh-1",
@@ -1302,6 +1356,172 @@ export async function mockAdminApis(page: Page) {
         total: nodes.length,
         tenantId: DEFAULT_TENANT_ID,
       });
+    }
+
+    // ============================================================
+    // Governance: Decisions / Policies / Events / Reasoning / PROV-O
+    // ============================================================
+
+    if (path === "/v1/decisions" && method === "GET") {
+      return json(route, { count: 1, decisions: [decisionSeed] });
+    }
+
+    if (path === "/v1/policies" && method === "GET") {
+      return json(route, { count: policies.length, policies });
+    }
+
+    if (path === "/v1/policies" && method === "POST") {
+      const payload = request.postDataJSON() as {
+        name?: string;
+        description?: string;
+        category?: string;
+        severity?: string;
+        ruleType?: string;
+        ruleConfig?: Record<string, unknown>;
+        enabled?: boolean;
+      };
+      const created = {
+        id: `pol-${Date.now()}`,
+        tenantId: DEFAULT_TENANT_ID,
+        name: payload.name ?? "Nova política",
+        description: payload.description ?? "",
+        category: payload.category ?? "*",
+        severity: payload.severity ?? "warning",
+        ruleType: payload.ruleType ?? "min_confidence",
+        ruleConfig: payload.ruleConfig ?? {},
+        enabled: payload.enabled ?? true,
+        createdAt: "2026-04-16T10:00:00.000Z",
+        updatedAt: "2026-04-16T10:00:00.000Z",
+        version: 1,
+      };
+      policies = [...policies, created];
+      return json(route, created, 201);
+    }
+
+    if (path === "/v1/policies/enforce" && method === "POST") {
+      const payload = request.postDataJSON() as { decisionId?: string };
+      return json(route, {
+        decision: { ...decisionSeed, id: payload.decisionId ?? decisionSeed.id },
+        compliant: false,
+        violations: [
+          {
+            policyId: "pol-1",
+            policyName: "Confiança mínima",
+            severity: "warning",
+            message: "Confiança 0.62 abaixo do mínimo 0.7",
+          },
+        ],
+      });
+    }
+
+    if (/^\/v1\/policies\/[^/]+$/.test(path) && method === "PUT") {
+      const id = path.split("/")[3];
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      const index = policies.findIndex((p) => p.id === id);
+      if (index >= 0) {
+        policies[index] = { ...policies[index], ...payload, updatedAt: "2026-04-16T11:00:00.000Z" } as (typeof policies)[number];
+        return json(route, policies[index]);
+      }
+      return json(route, { message: "Policy not found" }, 404);
+    }
+
+    if (/^\/v1\/policies\/[^/]+$/.test(path) && method === "DELETE") {
+      const id = path.split("/")[3];
+      policies = policies.filter((p) => p.id !== id);
+      return json(route, { ok: true });
+    }
+
+    if (path === "/v1/events" && method === "GET") {
+      const eventType = url.searchParams.get("eventType");
+      const filtered = eventType ? events.filter((ev) => ev.eventType === eventType) : events;
+      return json(route, { count: filtered.length, events: filtered });
+    }
+
+    if (path === "/v1/events" && method === "POST") {
+      const payload = request.postDataJSON() as {
+        eventType?: string;
+        title?: string;
+        description?: string;
+        occurredAt?: string;
+        participants?: Array<{ entityId: string }>;
+      };
+      const created = {
+        id: `evt-${Date.now()}`,
+        tenantId: DEFAULT_TENANT_ID,
+        eventType: payload.eventType ?? "meeting",
+        title: payload.title ?? "",
+        description: payload.description ?? "",
+        occurredAt: payload.occurredAt ?? "2026-04-16T14:00:00.000Z",
+        participants: payload.participants ?? [],
+        createdAt: "2026-04-16T14:05:00.000Z",
+      };
+      events = [created, ...events];
+      return json(route, created, 201);
+    }
+
+    if (path === "/v1/events/extract" && method === "POST") {
+      const extracted = [
+        {
+          id: `evt-x-${Date.now()}`,
+          tenantId: DEFAULT_TENANT_ID,
+          eventType: "meeting",
+          title: "Reunião de planejamento",
+          description: "Extraído do texto enviado.",
+          occurredAt: "2026-04-16T15:00:00.000Z",
+          participants: [],
+          createdAt: "2026-04-16T15:05:00.000Z",
+        },
+      ];
+      events = [...extracted, ...events];
+      return json(route, { count: extracted.length, events: extracted });
+    }
+
+    if (path === "/v1/events/stats" && method === "GET") {
+      return json(route, { deploy: 1, incident: 1 });
+    }
+
+    if (/^\/v1\/events\/[^/]+$/.test(path) && method === "DELETE") {
+      const id = path.split("/")[3];
+      events = events.filter((ev) => ev.id !== id);
+      return json(route, { ok: true });
+    }
+
+    if (path === "/v1/reasoning/abduce" && method === "POST") {
+      const payload = request.postDataJSON() as { decisionId?: string; question?: string };
+      return json(route, {
+        decision: { ...decisionSeed, id: payload.decisionId ?? decisionSeed.id },
+        question: payload.question ?? "",
+        evidenceUsed: 3,
+        model: "mock-reasoner",
+        hypotheses: [
+          {
+            cause: "Pressão por reduzir blast radius em produção",
+            confidence: 0.85,
+            evidence: ["Incidente recente de latência", "Política de release gradual"],
+            memoryIds: ["mem-auth"],
+          },
+          {
+            cause: "Preferência do time por rollouts incrementais",
+            confidence: 0.6,
+            evidence: ["Decisões anteriores semelhantes"],
+          },
+        ],
+      });
+    }
+
+    if (path === "/v1/export/provenance" && method === "GET") {
+      const format = url.searchParams.get("format") ?? "turtle";
+      if (format === "jsonld") {
+        return json(route, {
+          "@context": { prov: "http://www.w3.org/ns/prov#" },
+          "@graph": [{ "@id": "urn:brainsentry:decision:dec-001", "@type": "prov:Activity" }],
+        });
+      }
+      return text(
+        route,
+        "@prefix prov: <http://www.w3.org/ns/prov#> .\n<urn:brainsentry:decision:dec-001> a prov:Activity .\n",
+        "text/turtle"
+      );
     }
 
     // Batch Search
