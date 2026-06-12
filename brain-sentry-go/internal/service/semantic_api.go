@@ -27,6 +27,7 @@ type SemanticAPIService struct {
 // to keep the service decoupled from the concrete postgres.MemoryRepository.
 type memoryRepoForSemanticAPI interface {
 	FindByID(ctx context.Context, id string) (*domain.Memory, error)
+	List(ctx context.Context, page, size int) ([]domain.Memory, int64, error)
 }
 
 // NewSemanticAPIService creates a new SemanticAPIService.
@@ -333,9 +334,39 @@ func (s *SemanticAPIService) Forget(ctx context.Context, req ForgetRequest) (*Fo
 		return out, nil
 	}
 
-	// Set-only path: requires listing memories of that set (simplified — not implemented for now).
+	// Set-only path: page through the tenant's memories collecting members
+	// of the set, then delete. Two passes on purpose — deleting while
+	// paginating shifts the pages under us and skips rows.
 	if req.Set != "" {
-		return nil, fmt.Errorf("forget by set-only is not yet supported; provide query or memoryId")
+		want := normalizeSetName(req.Set)
+		const pageSize = 200
+		var targets []string
+		for page := 0; ; page++ {
+			memories, _, err := s.memoryRepo.List(ctx, page, pageSize)
+			if err != nil {
+				return nil, fmt.Errorf("list for forget: %w", err)
+			}
+			if len(memories) == 0 {
+				break
+			}
+			for i := range memories {
+				if containsString(s.nodeSetSvc.GetMemorySets(&memories[i]), want) {
+					targets = append(targets, memories[i].ID)
+				}
+			}
+			if len(memories) < pageSize {
+				break
+			}
+		}
+
+		for _, id := range targets {
+			if err := s.memoryService.DeleteMemory(ctx, id); err == nil {
+				out.DeletedIDs = append(out.DeletedIDs, id)
+			}
+		}
+		out.Count = len(out.DeletedIDs)
+		out.Message = fmt.Sprintf("deleted %d memories in set %q", out.Count, req.Set)
+		return out, nil
 	}
 
 	return nil, fmt.Errorf("one of memoryId, query, or set is required")
