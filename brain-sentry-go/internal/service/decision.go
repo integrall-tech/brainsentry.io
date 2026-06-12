@@ -13,10 +13,23 @@ import (
 	"github.com/integraltech/brainsentry/internal/repository/postgres"
 )
 
+// decisionRepository is the minimal repository surface used by
+// DecisionService. *postgres.DecisionRepository satisfies it; tests provide
+// in-memory fakes.
+type decisionRepository interface {
+	Create(ctx context.Context, d *domain.Decision) error
+	FindByID(ctx context.Context, id string) (*domain.Decision, error)
+	List(ctx context.Context, f postgres.DecisionFilter) ([]*domain.Decision, error)
+	Children(ctx context.Context, id string) ([]*domain.Decision, error)
+	FindPrecedents(ctx context.Context, category string, embedding []float32, limit int) ([]*domain.DecisionPrecedent, error)
+	Supersede(ctx context.Context, oldID, newID string) error
+	CountByCategory(ctx context.Context) (map[string]int, error)
+}
+
 // DecisionService orchestrates recording decisions, looking up precedents,
 // building causal chains, and enforcing policies.
 type DecisionService struct {
-	repo     *postgres.DecisionRepository
+	repo     decisionRepository
 	embedder *EmbeddingService
 	audit    *AuditService
 	policies *PolicyEngine
