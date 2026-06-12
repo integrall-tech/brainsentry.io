@@ -88,7 +88,10 @@ export function DashboardPage() {
     fetchData();
   }, [fetchData]);
 
-  // WebSocket for real-time updates
+  // Realtime via WebSocket fica atrás de flag: o backend Go ainda não expõe
+  // /ws (herança do legado Java). Sem a flag, nada de indicador "live"
+  // mentindo reconexão eterna — um polling leve mantém os dados frescos.
+  const wsEnabled = import.meta.env.VITE_WS_ENABLED === "true";
   const wsUrl = `${resolveWsBaseUrl()}/ws`;
   const handleWsMessage = useCallback((msg: WebSocketMessage) => {
     if (msg.type === "memory_created" || msg.type === "memory_updated" || msg.type === "memory_deleted") {
@@ -105,7 +108,14 @@ export function DashboardPage() {
     url: wsUrl,
     onMessage: handleWsMessage,
     reconnect: true,
+    enabled: wsEnabled,
   });
+
+  useEffect(() => {
+    if (wsEnabled) return;
+    const timer = setInterval(fetchData, 60_000);
+    return () => clearInterval(timer);
+  }, [wsEnabled, fetchData]);
 
   const handleRefresh = () => {
     fetchData();
@@ -141,7 +151,7 @@ export function DashboardPage() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <LiveIndicator status={wsStatus} className="bg-white/10 px-2 py-1 rounded-full" />
+              {wsEnabled && <LiveIndicator status={wsStatus} className="bg-white/10 px-2 py-1 rounded-full" />}
               <div className="text-xs text-white/80 hidden md:block">
                 {t("dashboard.tenant")}: <span className="font-medium text-white">{tenantId ? `${tenantId.slice(0, 8)}...` : "—"}</span>
               </div>

@@ -324,6 +324,22 @@ After the first deploy, the normal cycle is:
 For reproducible rollouts pin a specific `:<sha>` tag instead of
 `:latest` in `stack.yml`, then bump the SHA on each deploy.
 
+### Release gate (mandatory before promoting to production)
+
+After every deploy to homologação, run the real-API E2E suite against the
+live environment. It exercises memory CRUD with versioning, intercept
+filtering and auto-forget dry-run with real data (no mocks):
+
+```bash
+# from the repo root, on any machine that can reach the environment
+scripts/release-gate.sh http://<homolog_host>:8081/api
+```
+
+The script health-checks the backend first, then runs
+`E2E_REAL_API=1 playwright test -c playwright.real.config.ts` with the
+frontend served locally and pointed at that backend. A red run blocks the
+promotion; test data is created and cleaned in the default tenant.
+
 ---
 
 ## Knobs (env vars on the brainsentry-backend service)
