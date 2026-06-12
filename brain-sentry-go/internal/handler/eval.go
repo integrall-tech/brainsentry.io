@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/integraltech/brainsentry/internal/eval"
@@ -24,9 +25,9 @@ func NewEvalHandler(s *eval.Store) *EvalHandler {
 func (h *EvalHandler) Export(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	if _, err := h.Store.Export(w); err != nil {
-		// best-effort: response headers already flushed; nothing actionable
-		// beyond letting the connection close.
-		_ = err
+		// Headers already flushed — can't change the status code, but the
+		// operator needs to know exports are truncating.
+		slog.Warn("eval export interrupted mid-stream", "error", err)
 	}
 }
 

@@ -170,10 +170,11 @@ export function RelationshipsPage() {
     } catch (err) {
       console.error("Error fetching knowledge graph:", err);
       setKnowledgeGraph(null);
+      toast({ title: t("relationships.genericError"), description: (err as Error).message, variant: "error" });
     } finally {
       setIsLoadingGraph(false);
     }
-  }, []);
+  }, [toast, t]);
 
   // Fetch memory relationships
   const fetchRelationships = useCallback(async () => {
@@ -201,10 +202,11 @@ export function RelationshipsPage() {
     } catch (err) {
       console.error("Error fetching communities:", err);
       setCommunities([]);
+      toast({ title: t("relationships.genericError"), description: (err as Error).message, variant: "error" });
     } finally {
       setCommunitiesLoading(false);
     }
-  }, []);
+  }, [toast, t]);
 
   // Search memories
   const shouldSearch = debouncedSearchQuery && debouncedSearchQuery.length >= 2;
