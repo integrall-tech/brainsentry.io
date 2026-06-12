@@ -1,6 +1,8 @@
 import * as React from "react";
 import { jwtDecode } from "jwt-decode";
 
+import { API_BASE_URL, getStoredTenantId } from "@/lib/api/client";
+
 interface User {
   id: string;
   email: string;
@@ -27,8 +29,7 @@ const AuthContext = React.createContext<AuthContextValue | undefined>(undefined)
 
 const TOKEN_KEY = "brain_sentry_token";
 const USER_KEY = "brain_sentry_user";
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080/api";
-const DEFAULT_TENANT_ID = "a9f814d2-4dae-41f3-851b-8aa3d4706561";
+const API_URL = API_BASE_URL;
 
 interface AuthProviderProps {
   children: React.ReactNode;
@@ -75,12 +76,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const login = async (email: string, password: string) => {
-    const tenantId = localStorage.getItem("tenant_id") || DEFAULT_TENANT_ID;
+    // Pré-auth não há JWT; envia o tenant conhecido (se houver) e deixa o
+    // backend cair no default quando ausente. Nunca um ID hardcoded.
+    const tenantId = getStoredTenantId();
     const response = await fetch(`${API_URL}/v1/auth/login`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Tenant-ID": tenantId,
+        ...(tenantId ? { "X-Tenant-ID": tenantId } : {}),
       },
       body: JSON.stringify({ email, password }),
     });
@@ -95,7 +98,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     localStorage.setItem(TOKEN_KEY, token);
     localStorage.setItem(USER_KEY, JSON.stringify(user));
-    localStorage.setItem("tenant_id", responseTenantId || user?.tenantId || tenantId);
+    const resolvedTenantId = responseTenantId || user?.tenantId || tenantId;
+    if (resolvedTenantId) {
+      localStorage.setItem("tenant_id", resolvedTenantId);
+    }
 
     setState({
       user,

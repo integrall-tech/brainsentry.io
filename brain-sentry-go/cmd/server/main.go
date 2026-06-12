@@ -874,7 +874,9 @@ func main() {
 			r.Post("/login", authHandler.Login)
 			r.Post("/logout", authHandler.Logout)
 			r.Post("/refresh", authHandler.Refresh)
-			r.Post("/demo", authHandler.DemoLogin)
+			if cfg.Security.DemoAuthEnabled {
+				r.Post("/demo", authHandler.DemoLogin)
+			}
 			r.Get("/sso/authorize", ssoHandler.GetAuthURL)
 			r.Post("/sso/callback", ssoHandler.Callback)
 			r.Get("/sso/config", ssoHandler.GetConfig)
@@ -1100,14 +1102,14 @@ func main() {
 			r.Get("/llm-metrics", adminHandler.GetLLMMetrics)
 		})
 
-		// PII Scanner
-		r.Post("/v1/pii/scan", adminHandler.ScanPII)
+		// PII Scanner (admin only)
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).Post("/v1/pii/scan", adminHandler.ScanPII)
 
 		// Auto-Forget (admin only)
 		r.With(middleware.RequireRole(middleware.RoleAdmin)).Post("/v1/auto-forget", autoForgetHandler.Run)
 
-		// Semantic Memory Consolidation
-		r.Post("/v1/semantic/consolidate", semanticMemoryHandler.Consolidate)
+		// Semantic Memory Consolidation (admin only)
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).Post("/v1/semantic/consolidate", semanticMemoryHandler.Consolidate)
 
 		// Actions & Leases (multi-agent coordination)
 		r.Route("/v1/actions", func(r chi.Router) {

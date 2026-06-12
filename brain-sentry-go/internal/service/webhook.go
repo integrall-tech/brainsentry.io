@@ -240,6 +240,15 @@ func (s *WebhookService) deliver(wh *domain.Webhook, event domain.WebhookEventTy
 			delivery.Success = true
 			delivery.LatencyMs = time.Since(start).Milliseconds()
 			s.recordDelivery(&delivery)
+
+			// FailCount tracks *consecutive* failures — a success resets it.
+			s.mu.Lock()
+			if wh.FailCount > 0 {
+				wh.FailCount = 0
+				wh.LastError = ""
+				wh.UpdatedAt = time.Now()
+			}
+			s.mu.Unlock()
 			return
 		}
 
@@ -252,7 +261,9 @@ func (s *WebhookService) deliver(wh *domain.Webhook, event domain.WebhookEventTy
 	delivery.LatencyMs = time.Since(start).Milliseconds()
 	s.recordDelivery(&delivery)
 
-	// Update webhook fail count
+	// Update webhook fail count. Copy the struct under the lock so the
+	// repository marshals a stable snapshot — concurrent deliveries mutate
+	// the shared *domain.Webhook.
 	s.mu.Lock()
 	wh.FailCount++
 	wh.LastError = lastErr.Error()
@@ -262,11 +273,14 @@ func (s *WebhookService) deliver(wh *domain.Webhook, event domain.WebhookEventTy
 		wh.Active = false
 		slog.Warn("webhook auto-disabled after failures", "id", wh.ID, "url", wh.URL, "failCount", wh.FailCount)
 	}
+	snapshot := *wh
 	s.mu.Unlock()
 
 	// Persist failure state
 	if s.webhookRepo != nil {
-		s.webhookRepo.Update(context.Background(), wh)
+		if err := s.webhookRepo.Update(context.Background(), &snapshot); err != nil {
+			slog.Warn("failed to persist webhook failure state", "id", snapshot.ID, "error", err)
+		}
 	}
 }
 

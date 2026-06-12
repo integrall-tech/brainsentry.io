@@ -14,10 +14,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { useDebounce } from "@/hooks";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { api } from "@/lib/api/client";
+import { api, API_BASE_URL as API_URL } from "@/lib/api/client";
 import CytoscapeComponent from "react-cytoscapejs";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
 interface Memory {
   id: string;
@@ -172,10 +170,11 @@ export function RelationshipsPage() {
     } catch (err) {
       console.error("Error fetching knowledge graph:", err);
       setKnowledgeGraph(null);
+      toast({ title: t("relationships.genericError"), description: (err as Error).message, variant: "error" });
     } finally {
       setIsLoadingGraph(false);
     }
-  }, []);
+  }, [toast, t]);
 
   // Fetch memory relationships
   const fetchRelationships = useCallback(async () => {
@@ -203,10 +202,11 @@ export function RelationshipsPage() {
     } catch (err) {
       console.error("Error fetching communities:", err);
       setCommunities([]);
+      toast({ title: t("relationships.genericError"), description: (err as Error).message, variant: "error" });
     } finally {
       setCommunitiesLoading(false);
     }
-  }, []);
+  }, [toast, t]);
 
   // Search memories
   const shouldSearch = debouncedSearchQuery && debouncedSearchQuery.length >= 2;

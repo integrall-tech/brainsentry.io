@@ -1,7 +1,33 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse } from "axios";
 
-// Configuração base da API
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080/api";
+// Configuração base da API — fonte única para toda a aplicação.
+// Produção sem VITE_API_URL assume same-origin atrás de reverse proxy (/api);
+// nunca cai em localhost.
+function resolveApiBaseUrl(): string {
+  const fromEnv = import.meta.env.VITE_API_URL;
+  if (fromEnv) return fromEnv.replace(/\/$/, "");
+  if (import.meta.env.PROD) return "/api";
+  return "http://localhost:8081/api";
+}
+
+export const API_BASE_URL = resolveApiBaseUrl();
+
+// Base WebSocket — mesmo critério: env > same-origin (prod) > dev local.
+export function resolveWsBaseUrl(): string {
+  const fromEnv = import.meta.env.VITE_WS_URL;
+  if (fromEnv) return fromEnv.replace(/\/$/, "");
+  if (import.meta.env.PROD) {
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${window.location.host}`;
+  }
+  return "ws://localhost:8081";
+}
+
+// Tenant do usuário logado (gravado no login). Sem fallback hardcoded:
+// quando ausente, o header não é enviado e o backend resolve pelo JWT claim.
+export function getStoredTenantId(): string | null {
+  return localStorage.getItem("tenant_id");
+}
 
 // Tipos de resposta da API
 export interface ApiResponse<T> {
@@ -400,14 +426,17 @@ export interface MeshSyncResult {
 
 // Interceptador para adicionar headers de autenticação
 const authRequestInterceptor = (config: InternalAxiosRequestConfig): InternalAxiosRequestConfig => {
-  // Adicionar tenant ID se disponível
-  const tenantId = localStorage.getItem("tenant_id") || "a9f814d2-4dae-41f3-851b-8aa3d4706561";
+  // Tenant só vai no header quando conhecido; sem fallback hardcoded —
+  // o backend resolve pelo JWT claim quando o header está ausente.
+  const tenantId = getStoredTenantId();
 
   // Adicionar token JWT se disponível
   const token = localStorage.getItem("brain_sentry_token");
 
   if (config.headers) {
-    config.headers["X-Tenant-ID"] = tenantId;
+    if (tenantId) {
+      config.headers["X-Tenant-ID"] = tenantId;
+    }
     if (token) {
       config.headers["Authorization"] = `Bearer ${token}`;
     }

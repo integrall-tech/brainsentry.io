@@ -910,43 +910,9 @@ func TestTenantExtractor_HeaderTakesPrecedenceOverQuery(t *testing.T) {
 	}
 }
 
-func TestTenantExtractor_HeaderTakesPrecedenceOverJWTClaim(t *testing.T) {
-	var capturedTenantID string
-	captureHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		capturedTenantID = tenant.FromContext(r.Context())
-		w.WriteHeader(http.StatusOK)
-	})
-
-	handler := TenantExtractor("default")(captureHandler)
-
-	claims := &AuthClaims{UserID: "u1", TenantID: "jwt-tenant"}
-	req := claimsInContext(httptest.NewRequest(http.MethodGet, "/", nil), claims)
-	req.Header.Set("X-Tenant-ID", "header-tenant")
-	handler.ServeHTTP(httptest.NewRecorder(), req)
-
-	if capturedTenantID != "header-tenant" {
-		t.Errorf("expected header tenant to take precedence over JWT claim, got %q", capturedTenantID)
-	}
-}
-
-func TestTenantExtractor_QueryTakesPrecedenceOverJWTClaim(t *testing.T) {
-	var capturedTenantID string
-	captureHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		capturedTenantID = tenant.FromContext(r.Context())
-		w.WriteHeader(http.StatusOK)
-	})
-
-	handler := TenantExtractor("default")(captureHandler)
-
-	claims := &AuthClaims{UserID: "u1", TenantID: "jwt-tenant"}
-	req := claimsInContext(httptest.NewRequest(http.MethodGet, "/?tenant=query-tenant", nil), claims)
-	// No X-Tenant-ID header
-	handler.ServeHTTP(httptest.NewRecorder(), req)
-
-	if capturedTenantID != "query-tenant" {
-		t.Errorf("expected query param to take precedence over JWT claim, got %q", capturedTenantID)
-	}
-}
+// NOTE: the old "header/query takes precedence over JWT claim" tests were
+// removed on purpose: that behavior was a cross-tenant access vulnerability.
+// The claim-is-source-of-truth semantics are covered in tenant_test.go.
 
 func TestTenantExtractor_TenantInContextAfterExtraction(t *testing.T) {
 	var tenantFound bool

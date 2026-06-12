@@ -50,7 +50,7 @@ spring:
     redis:
       host: ${FALKORDB_HOST:192.168.100.1}
       port: ${FALKORDB_PORT:6380}
-      password: ${FALKORDB_PASSWORD:Relevant727204}
+      password: ${FALKORDB_PASSWORD:}
       database: 0
       timeout: 2000ms
       lettuce:
@@ -73,7 +73,7 @@ brain-sentry:
   redis:
     host: ${FALKORDB_HOST:192.168.100.1}
     port: ${FALKORDB_PORT:6380}
-    password: ${FALKORDB_PASSWORD:Relevant727204}
+    password: ${FALKORDB_PASSWORD:}
     database: 0
     timeout: 2000
 
@@ -85,7 +85,7 @@ brain-sentry:
   llm:
     provider: ${BRAINSENTRY_AI_AGENTIC_MODEL_PROVIDER:OPENROUTER}
     model: ${BRAINSENTRY_AI_AGENTIC_MODEL_MODEL:x-ai/grok-4-fast}
-    api-key: ${BRAINSENTRY_AI_AGENTIC_MODEL_API_KEY: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}
+    api-key: ${BRAINSENTRY_AI_AGENTIC_MODEL_API_KEY:}
     base-url: ${BRAINSENTRY_AI_AGENTIC_MODEL_BASE_URL:https://openrouter.ai/api/v1/chat/completions}
     temperature: ${BRAINSENTRY_AI_AGENTIC_MODEL_TEMPERATURE:0.2}
     max-tokens: ${LLM_MAX_TOKENS:500}
@@ -161,7 +161,7 @@ management:
 # Security Configuration
 security:
   jwt:
-    secret: ${JWT_SECRET:brain-sentry-secret-change-in-production}
+    secret: ${JWT_SECRET:}
     expiration: ${JWT_EXPIRATION:86400000}  # 24 hours in milliseconds
   cors:
     allowed-origins: ${CORS_ORIGINS:http://localhost:5173,http://localhost:3000,http://localhost:6174}

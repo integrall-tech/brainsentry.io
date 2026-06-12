@@ -23,7 +23,7 @@ import { CategoryTag, ImportanceTag, ReadOnlyTags } from "@/components/ui/tags";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/contexts/AuthContext";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
+import { API_BASE_URL as API_URL, getStoredTenantId } from "@/lib/api/client";
 
 interface AuditLog {
   id: string;
@@ -68,7 +68,7 @@ export function AuditPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const dateLocale = i18n.language === "en" ? "en-US" : "pt-BR";
-  const tenantId = user?.tenantId || "a9f814d2-4dae-41f3-851b-8aa3d4706561";
+  const tenantId = user?.tenantId ?? "";
 
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
@@ -98,7 +98,7 @@ export function AuditPage() {
   const handleExport = async () => {
     try {
       const token = localStorage.getItem("brain_sentry_token");
-      const tenantId = localStorage.getItem("tenant_id") || "a9f814d2-4dae-41f3-851b-8aa3d4706561";
+      const tenantId = getStoredTenantId() ?? "";
       const response = await fetch(`${API_URL}/v1/audit/logs/export`, {
         headers: {
           "Content-Type": "application/json",

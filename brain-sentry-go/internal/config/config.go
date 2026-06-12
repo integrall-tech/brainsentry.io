@@ -31,6 +31,10 @@ type ServerConfig struct {
 	Port            int           `yaml:"port"`
 	ContextPath     string        `yaml:"context_path"`
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`
+	// Environment selects runtime mode: "development" (default) or
+	// "production". Production enables hard validation (Validate) and
+	// stricter defaults (e.g. sslmode=require).
+	Environment string `yaml:"environment"`
 }
 
 type DatabaseConfig struct {
@@ -39,13 +43,18 @@ type DatabaseConfig struct {
 	Name           string `yaml:"name"`
 	User           string `yaml:"user"`
 	Password       string `yaml:"password"`
+	SSLMode        string `yaml:"sslmode"`
 	MaxConnections int    `yaml:"max_connections"`
 	MinConnections int    `yaml:"min_connections"`
 }
 
 func (d DatabaseConfig) DSN() string {
-	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
-		d.User, d.Password, d.Host, d.Port, d.Name)
+	sslMode := d.SSLMode
+	if sslMode == "" {
+		sslMode = "disable"
+	}
+	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
+		d.User, d.Password, d.Host, d.Port, d.Name, sslMode)
 }
 
 type RedisConfig struct {
@@ -75,6 +84,10 @@ type SecurityConfig struct {
 	JWTExpiration time.Duration `yaml:"jwt_expiration"`
 	BcryptCost    int        `yaml:"bcrypt_cost"`
 	CORS          CORSConfig `yaml:"cors"`
+	// DemoAuthEnabled exposes POST /v1/auth/demo, which logs anyone in as
+	// the shared demo user. Dev/demo convenience only — Validate refuses
+	// it in production.
+	DemoAuthEnabled bool `yaml:"demo_auth_enabled"`
 }
 
 type CORSConfig struct {
@@ -169,6 +182,10 @@ type LoggingConfig struct {
 	Format string `yaml:"format"`
 }
 
+// defaultJWTSecret is the placeholder shipped in config.yaml. Validate
+// refuses to boot a production server still using it.
+const defaultJWTSecret = "your-256-bit-secret-key-change-in-production-min-32-chars"
+
 // Load reads configuration from a YAML file and applies environment variable overrides.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
@@ -184,12 +201,55 @@ func Load(path string) (*Config, error) {
 	// Environment variable overrides
 	applyEnvOverrides(cfg)
 
+	// Stricter defaults in production: encrypted Postgres connection unless
+	// the operator explicitly opted out via config/env.
+	if cfg.IsProduction() && cfg.Database.SSLMode == "" {
+		cfg.Database.SSLMode = "require"
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+// IsProduction reports whether the server runs in production mode.
+func (c *Config) IsProduction() bool {
+	return strings.EqualFold(c.Server.Environment, "production")
+}
+
+// Validate enforces invariants that must hold before the server is allowed
+// to boot. All production checks fail closed: a misconfigured production
+// server must not come up at all.
+func (c *Config) Validate() error {
+	if !c.IsProduction() {
+		return nil
+	}
+	if c.Security.JWTSecret == "" || c.Security.JWTSecret == defaultJWTSecret {
+		return fmt.Errorf("config: production requires a real security.jwt_secret (set JWT_SECRET); refusing to boot with the default/empty secret")
+	}
+	if len(c.Security.JWTSecret) < 32 {
+		return fmt.Errorf("config: production security.jwt_secret must be at least 32 characters")
+	}
+	if c.Security.DemoAuthEnabled {
+		return fmt.Errorf("config: security.demo_auth_enabled must be false in production (shared demo user with a known password)")
+	}
+	return nil
 }
 
 func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("PORT"); v != "" {
 		fmt.Sscanf(v, "%d", &cfg.Server.Port)
+	}
+	if v := os.Getenv("BRAINSENTRY_ENV"); v != "" {
+		cfg.Server.Environment = v
+	}
+	if v := os.Getenv("DB_SSLMODE"); v != "" {
+		cfg.Database.SSLMode = v
+	}
+	if v := os.Getenv("DEMO_AUTH_ENABLED"); v != "" {
+		cfg.Security.DemoAuthEnabled = v == "1" || strings.EqualFold(v, "true")
 	}
 	if v := os.Getenv("DATABASE_URL"); v != "" {
 		// Parse DATABASE_URL if provided

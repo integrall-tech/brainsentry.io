@@ -47,11 +47,18 @@ import {
   PanelLeftOpen,
   Stethoscope,
   Cpu,
+  LogOut,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ThemeSelector } from "@/components/ui/theme-selector";
 import { LanguageSwitcher } from "@/components/ui/language-switcher";
 import { ScreenHelp } from "@/components/ui/ScreenHelp";
@@ -153,7 +160,12 @@ export function AdminLayout() {
   const [collapsed, setCollapsed] = useState<boolean>(() => loadSidebarCollapsed());
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login");
+  };
 
   const navigation = useMemo<NavEntry[]>(
     () => [
@@ -319,27 +331,33 @@ export function AdminLayout() {
     navigate(href);
   };
 
-  // Rail mode: flat list of icon-only buttons with title tooltips.
+  // Rail mode: flat list of icon-only buttons. Each gets a Radix tooltip
+  // (rendered in a portal, so it isn't clipped by the sidebar overflow)
+  // showing the item's label on hover/focus — without it, collapsed icons
+  // are hard to identify. aria-label keeps it accessible to screen readers.
   const renderRail = () => (
     <>
       {flatItems.map((item) => {
         const isActive = activeItemId === item.id;
         return (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => handleNavigation(item.href)}
-            title={item.title}
-            aria-label={item.title}
-            className={cn(
-              "w-full flex items-center justify-center h-9 rounded-md transition-all",
-              isActive
-                ? "bg-gradient-to-r from-brain-primary to-brain-accent text-white shadow-md"
-                : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-            )}
-          >
-            <item.icon className="h-4 w-4" />
-          </button>
+          <Tooltip key={item.id}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => handleNavigation(item.href)}
+                aria-label={item.title}
+                className={cn(
+                  "w-full flex items-center justify-center h-9 rounded-md transition-all",
+                  isActive
+                    ? "bg-gradient-to-r from-brain-primary to-brain-accent text-white shadow-md"
+                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                )}
+              >
+                <item.icon className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{item.title}</TooltipContent>
+          </Tooltip>
         );
       })}
     </>
@@ -428,6 +446,7 @@ export function AdminLayout() {
   );
 
   return (
+    <TooltipProvider delayDuration={250} skipDelayDuration={500}>
     <div className="h-screen flex flex-col md:flex-row overflow-hidden">
       {/* Top bar for mobile */}
       <div className="md:hidden flex items-center justify-between p-4 border-b bg-background">
@@ -503,6 +522,16 @@ export function AdminLayout() {
             <div className="flex flex-col items-center gap-1">
               <LanguageSwitcher />
               <ThemeSelector />
+              <button
+                type="button"
+                data-testid="sidebar-logout"
+                onClick={handleLogout}
+                aria-label={t("auth.logout")}
+                title={t("auth.logout")}
+                className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-destructive transition-colors"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
             </div>
           ) : (
             <>
@@ -511,6 +540,16 @@ export function AdminLayout() {
                 <div className="flex items-center gap-1">
                   <LanguageSwitcher />
                   <ThemeSelector />
+                  <button
+                    type="button"
+                    data-testid="sidebar-logout"
+                    onClick={handleLogout}
+                    aria-label={t("auth.logout")}
+                    title={t("auth.logout")}
+                    className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-destructive transition-colors"
+                  >
+                    <LogOut className="h-4 w-4" />
+                  </button>
                 </div>
               </div>
               <div className="text-xs text-muted-foreground mt-1">
@@ -542,6 +581,17 @@ export function AdminLayout() {
             <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto">
               {renderNavTree(() => setMobileMenuOpen(false), true)}
             </nav>
+            <div className="border-t p-4">
+              <button
+                type="button"
+                data-testid="mobile-logout"
+                onClick={handleLogout}
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-destructive transition-colors"
+              >
+                <LogOut className="h-4 w-4" />
+                {t("auth.logout")}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -585,5 +635,6 @@ export function AdminLayout() {
         />
       )}
     </div>
+    </TooltipProvider>
   );
 }

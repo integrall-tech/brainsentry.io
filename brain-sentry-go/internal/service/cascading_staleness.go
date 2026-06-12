@@ -6,14 +6,25 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/integraltech/brainsentry/internal/domain"
 	"github.com/integraltech/brainsentry/internal/repository/postgres"
 )
+
+type stalenessMemoryRepository interface {
+	FindByID(ctx context.Context, id string) (*domain.Memory, error)
+	Update(ctx context.Context, m *domain.Memory) error
+}
+
+type stalenessRelationshipRepository interface {
+	FindByFromMemoryID(ctx context.Context, memoryID string) ([]domain.MemoryRelationship, error)
+	FindByToMemoryID(ctx context.Context, memoryID string) ([]domain.MemoryRelationship, error)
+}
 
 // CascadingStalenessService propagates staleness through the knowledge graph
 // when a memory is superseded, preventing obsolete data from polluting search results.
 type CascadingStalenessService struct {
-	memoryRepo       *postgres.MemoryRepository
-	relationshipRepo *postgres.RelationshipRepository
+	memoryRepo       stalenessMemoryRepository
+	relationshipRepo stalenessRelationshipRepository
 	auditService     *AuditService
 	maxDepth         int
 }
@@ -118,9 +129,11 @@ func (s *CascadingStalenessService) PropagateFromSupersession(ctx context.Contex
 			"depth", result.Depth,
 		)
 
-		go s.auditService.LogError(context.Background(), "staleness_propagation",
-			fmt.Sprintf("superseded=%s newId=%s stale=%d review=%d",
-				supersededID, newID, len(result.MarkedStale), len(result.MarkedForReview)))
+		if s.auditService != nil {
+			go s.auditService.LogError(context.Background(), "staleness_propagation",
+				fmt.Sprintf("superseded=%s newId=%s stale=%d review=%d",
+					supersededID, newID, len(result.MarkedStale), len(result.MarkedForReview)))
+		}
 	}
 
 	return result, nil

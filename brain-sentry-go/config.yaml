@@ -2,13 +2,19 @@ server:
   port: 8081
   context_path: /api
   shutdown_timeout: 30s
+  # "development" ou "production". Em production o boot RECUSA jwt_secret
+  # default, demo_auth_enabled e força sslmode=require (override: BRAINSENTRY_ENV).
+  environment: development
 
 database:
   host: localhost
   port: 5432
   name: brainsentry
   user: brainsentry
+  # Senha de DEV (docker-compose local). Em produção use DB_PASSWORD via env.
   password: brainsentry
+  # disable em dev; em production o default vira require (override: DB_SSLMODE).
+  sslmode: disable
   max_connections: 20
   min_connections: 5
 
@@ -25,9 +31,12 @@ falkordb:
   graph_name: brainsentry
 
 security:
+  # Placeholder de DEV — em produção o boot recusa este valor; use JWT_SECRET via env.
   jwt_secret: "your-256-bit-secret-key-change-in-production-min-32-chars"
   jwt_expiration: 24h
   bcrypt_cost: 12
+  # Expõe POST /v1/auth/demo (usuário demo compartilhado). Só dev — recusado em production.
+  demo_auth_enabled: true
   cors:
     allowed_origins:
       - "http://localhost:3000"
