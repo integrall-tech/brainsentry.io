@@ -471,6 +471,100 @@ func TestLoad_RealProjectConfig(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Production validation (fail-closed boot)
+// ---------------------------------------------------------------------------
+
+const strongSecret = "0123456789abcdef0123456789abcdef0123456789abcdef"
+
+func TestLoad_ProductionRefusesDefaultJWTSecret(t *testing.T) {
+	f := writeTempFile(t, "server:\n  environment: production\nsecurity:\n  jwt_secret: \""+defaultJWTSecret+"\"\n")
+	defer os.Remove(f)
+
+	if _, err := Load(f); err == nil {
+		t.Fatal("expected production boot to refuse the default JWT secret")
+	}
+}
+
+func TestLoad_ProductionRefusesEmptyJWTSecret(t *testing.T) {
+	f := writeTempFile(t, "server:\n  environment: production\n")
+	defer os.Remove(f)
+
+	if _, err := Load(f); err == nil {
+		t.Fatal("expected production boot to refuse an empty JWT secret")
+	}
+}
+
+func TestLoad_ProductionRefusesShortJWTSecret(t *testing.T) {
+	f := writeTempFile(t, "server:\n  environment: production\nsecurity:\n  jwt_secret: short\n")
+	defer os.Remove(f)
+
+	if _, err := Load(f); err == nil {
+		t.Fatal("expected production boot to refuse a <32 char JWT secret")
+	}
+}
+
+func TestLoad_ProductionRefusesDemoAuth(t *testing.T) {
+	f := writeTempFile(t, "server:\n  environment: production\nsecurity:\n  jwt_secret: \""+strongSecret+"\"\n  demo_auth_enabled: true\n")
+	defer os.Remove(f)
+
+	if _, err := Load(f); err == nil {
+		t.Fatal("expected production boot to refuse demo_auth_enabled")
+	}
+}
+
+func TestLoad_ProductionDefaultsSSLModeToRequire(t *testing.T) {
+	f := writeTempFile(t, "server:\n  environment: production\nsecurity:\n  jwt_secret: \""+strongSecret+"\"\n")
+	defer os.Remove(f)
+
+	cfg, err := Load(f)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Database.SSLMode != "require" {
+		t.Errorf("expected production sslmode default 'require', got %q", cfg.Database.SSLMode)
+	}
+	if !strings.Contains(cfg.Database.DSN(), "sslmode=require") {
+		t.Errorf("expected DSN to carry sslmode=require, got %q", cfg.Database.DSN())
+	}
+}
+
+func TestLoad_DevelopmentAllowsDevDefaults(t *testing.T) {
+	f := writeTempFile(t, "security:\n  jwt_secret: \""+defaultJWTSecret+"\"\n  demo_auth_enabled: true\n")
+	defer os.Remove(f)
+
+	if _, err := Load(f); err != nil {
+		t.Fatalf("development mode must tolerate dev defaults, got: %v", err)
+	}
+}
+
+func TestLoad_EnvOverrides_EnvironmentAndSSLMode(t *testing.T) {
+	f := writeTempFile(t, "security:\n  jwt_secret: \""+strongSecret+"\"\n")
+	defer os.Remove(f)
+
+	t.Setenv("BRAINSENTRY_ENV", "production")
+	t.Setenv("DB_SSLMODE", "verify-full")
+
+	cfg, err := Load(f)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.IsProduction() {
+		t.Error("expected BRAINSENTRY_ENV=production to enable production mode")
+	}
+	if cfg.Database.SSLMode != "verify-full" {
+		t.Errorf("expected DB_SSLMODE override 'verify-full', got %q", cfg.Database.SSLMode)
+	}
+}
+
+func TestDatabaseConfig_DSN_CustomSSLMode(t *testing.T) {
+	cfg := DatabaseConfig{Host: "h", Port: 5432, Name: "n", User: "u", Password: "p", SSLMode: "require"}
+	want := "postgres://u:p@h:5432/n?sslmode=require"
+	if got := cfg.DSN(); got != want {
+		t.Errorf("DSN() = %q, want %q", got, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
 
