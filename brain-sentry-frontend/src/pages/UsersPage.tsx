@@ -24,7 +24,7 @@ import { useFetch } from "@/hooks";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/contexts/AuthContext";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
+import { API_BASE_URL as API_URL } from "@/lib/api/client";
 
 interface User {
   id: string;
@@ -64,7 +64,8 @@ export function UsersPage() {
   const { t, i18n } = useTranslation();
   const { user: currentUser } = useAuth();
   const { toast } = useToast();
-  const tenantId = currentUser?.tenantId || "a9f814d2-4dae-41f3-851b-8aa3d4706561";
+  // Sem fallback: header vazio é ignorado pelo backend, que usa o JWT claim.
+  const tenantId = currentUser?.tenantId ?? "";
   const dateLocale = i18n.language === "en" ? "en-US" : "pt-BR";
   const ROLE_OPTIONS = ROLE_KEYS.map((k) => ({ value: k, label: t(`users.roleOptions.${k}`) }));
 

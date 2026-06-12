@@ -5,13 +5,13 @@ import { useLanguage } from "../../contexts/LanguageContext";
 
 export function CTASection() {
   const [email, setEmail] = useState("");
+  const [submitted, setSubmitted] = useState(false);
   const { t } = useLanguage();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("Email submitted:", email);
     setEmail("");
-    alert("Thanks for joining the waitlist! We'll be in touch soon.");
+    setSubmitted(true);
   };
 
   return (
@@ -26,6 +26,11 @@ export function CTASection() {
           </p>
 
           {/* Email Form */}
+          {submitted && (
+            <p className="text-brain-success mb-4" role="status">
+              {t("cta.thanks")}
+            </p>
+          )}
           <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-3 mb-8">
             <input
               type="email"

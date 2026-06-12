@@ -9,8 +9,13 @@ import { Spinner } from "@/components/ui/spinner";
 import { LanguageSwitcher } from "@/components/ui/language-switcher";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/components/ui/toast";
+import { API_BASE_URL as API_URL } from "@/lib/api/client";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
+// O login demo (usuário compartilhado) só aparece em dev ou quando o build
+// de homologação pede explicitamente via VITE_DEMO_LOGIN=true. O backend
+// também precisa estar com security.demo_auth_enabled.
+const DEMO_LOGIN_ENABLED =
+  import.meta.env.DEV || import.meta.env.VITE_DEMO_LOGIN === "true";
 
 export function LoginPage() {
   const { t } = useTranslation();
@@ -165,26 +170,30 @@ export function LoginPage() {
                 )}
               </Button>
 
-              <div className="relative my-6">
-                <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t" />
-                </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-background px-2 text-muted-foreground">
-                    {t("auth.or")}
-                  </span>
-                </div>
-              </div>
+              {DEMO_LOGIN_ENABLED && (
+                <>
+                  <div className="relative my-6">
+                    <div className="absolute inset-0 flex items-center">
+                      <span className="w-full border-t" />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-background px-2 text-muted-foreground">
+                        {t("auth.or")}
+                      </span>
+                    </div>
+                  </div>
 
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full"
-                onClick={handleDemoLogin}
-                disabled={isLoading}
-              >
-                {t("auth.demoLogin")}
-              </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={handleDemoLogin}
+                    disabled={isLoading}
+                  >
+                    {t("auth.demoLogin")}
+                  </Button>
+                </>
+              )}
             </form>
           </CardContent>
         </Card>

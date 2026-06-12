@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
+import { getStoredTenantId } from "@/lib/api/client";
+
 // Hook for fetching data with loading and error states
 interface UseFetchResult<T> {
   data: T | null;
@@ -24,10 +26,10 @@ export function useFetch<T>(
 
     try {
       const token = localStorage.getItem("brain_sentry_token");
-      const tenantId = localStorage.getItem("tenant_id") || "a9f814d2-4dae-41f3-851b-8aa3d4706561";
+      const tenantId = getStoredTenantId();
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
-        "X-Tenant-ID": tenantId,
+        ...(tenantId ? { "X-Tenant-ID": tenantId } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options?.headers as Record<string, string> || {}),
       };

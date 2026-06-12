@@ -154,6 +154,7 @@ const translations: Record<Language, Record<string, string>> = {
     "cta.benefit4": "Influence roadmap",
     "cta.or": "Or",
     "cta.github": "Star on GitHub",
+    "cta.thanks": "Thanks for joining the waitlist! We'll be in touch soon.",
 
     // Use Cases Section
     "usecases.badge": "USE CASES",
@@ -369,6 +370,7 @@ const translations: Record<Language, Record<string, string>> = {
     "cta.benefit4": "Influencie o roadmap",
     "cta.or": "Ou",
     "cta.github": "Estrela no GitHub",
+    "cta.thanks": "Obrigado por entrar na lista! Entraremos em contato em breve.",
 
     // Use Cases Section
     "usecases.badge": "CASOS DE USO",
@@ -584,6 +586,7 @@ const translations: Record<Language, Record<string, string>> = {
     "cta.benefit4": "Influye en el roadmap",
     "cta.or": "O",
     "cta.github": "Estrella en GitHub",
+    "cta.thanks": "¡Gracias por unirte a la lista! Nos pondremos en contacto pronto.",
 
     // Use Cases Section
     "usecases.badge": "CASOS DE USO",

@@ -13,7 +13,7 @@ import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
+import { API_BASE_URL as API_URL } from "@/lib/api/client";
 
 interface ConfigSection {
   id: string;
@@ -611,7 +611,7 @@ export function ConfigurationPage() {
                   </div>
                   <div>
                     <dt className="text-muted-foreground">{t("configuration.tenant")}</dt>
-                    <dd className="font-medium">{user?.tenantId || "a9f814d2-4dae-41f3-851b-8aa3d4706561"}</dd>
+                    <dd className="font-medium">{user?.tenantId || "—"}</dd>
                   </div>
                 </dl>
               </CardContent>

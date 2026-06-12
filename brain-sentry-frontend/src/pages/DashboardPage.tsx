@@ -21,7 +21,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { MemoryCard } from "@/components/memory";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { api } from "@/lib/api";
+import { api, resolveWsBaseUrl } from "@/lib/api";
 import { KnowledgeGraph } from "@/components/visualizations/KnowledgeGraph";
 import { ActivityHeatmap } from "@/components/visualizations/ActivityHeatmap";
 import { LiveIndicator } from "@/components/visualizations/LiveIndicator";
@@ -55,7 +55,7 @@ export function DashboardPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
-  const tenantId = user?.tenantId || "a9f814d2-4dae-41f3-851b-8aa3d4706561";
+  const tenantId = user?.tenantId ?? "";
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [memories, setMemories] = useState<RecentMemory[]>([]);
@@ -86,7 +86,7 @@ export function DashboardPage() {
   }, [fetchData]);
 
   // WebSocket for real-time updates
-  const wsUrl = `${(import.meta.env.VITE_WS_URL || "ws://localhost:8080").replace(/\/$/, "")}/ws`;
+  const wsUrl = `${resolveWsBaseUrl()}/ws`;
   const handleWsMessage = useCallback((msg: WebSocketMessage) => {
     if (msg.type === "memory_created" || msg.type === "memory_updated" || msg.type === "memory_deleted") {
       fetchData();
@@ -140,7 +140,7 @@ export function DashboardPage() {
             <div className="flex items-center gap-3">
               <LiveIndicator status={wsStatus} className="bg-white/10 px-2 py-1 rounded-full" />
               <div className="text-xs text-white/80 hidden md:block">
-                {t("dashboard.tenant")}: <span className="font-medium text-white">{tenantId.slice(0, 8)}...</span>
+                {t("dashboard.tenant")}: <span className="font-medium text-white">{tenantId ? `${tenantId.slice(0, 8)}...` : "—"}</span>
               </div>
               <Button variant="outline" size="sm" className="bg-white/20 border-white/30 text-white hover:bg-white/30" onClick={handleRefresh}>
                 <Activity className="h-4 w-4" />
