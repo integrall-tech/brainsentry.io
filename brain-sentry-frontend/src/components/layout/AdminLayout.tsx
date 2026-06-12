@@ -52,6 +52,12 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ThemeSelector } from "@/components/ui/theme-selector";
 import { LanguageSwitcher } from "@/components/ui/language-switcher";
 import { ScreenHelp } from "@/components/ui/ScreenHelp";
@@ -319,27 +325,33 @@ export function AdminLayout() {
     navigate(href);
   };
 
-  // Rail mode: flat list of icon-only buttons with title tooltips.
+  // Rail mode: flat list of icon-only buttons. Each gets a Radix tooltip
+  // (rendered in a portal, so it isn't clipped by the sidebar overflow)
+  // showing the item's label on hover/focus — without it, collapsed icons
+  // are hard to identify. aria-label keeps it accessible to screen readers.
   const renderRail = () => (
     <>
       {flatItems.map((item) => {
         const isActive = activeItemId === item.id;
         return (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => handleNavigation(item.href)}
-            title={item.title}
-            aria-label={item.title}
-            className={cn(
-              "w-full flex items-center justify-center h-9 rounded-md transition-all",
-              isActive
-                ? "bg-gradient-to-r from-brain-primary to-brain-accent text-white shadow-md"
-                : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-            )}
-          >
-            <item.icon className="h-4 w-4" />
-          </button>
+          <Tooltip key={item.id}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => handleNavigation(item.href)}
+                aria-label={item.title}
+                className={cn(
+                  "w-full flex items-center justify-center h-9 rounded-md transition-all",
+                  isActive
+                    ? "bg-gradient-to-r from-brain-primary to-brain-accent text-white shadow-md"
+                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                )}
+              >
+                <item.icon className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{item.title}</TooltipContent>
+          </Tooltip>
         );
       })}
     </>
@@ -428,6 +440,7 @@ export function AdminLayout() {
   );
 
   return (
+    <TooltipProvider delayDuration={250} skipDelayDuration={500}>
     <div className="h-screen flex flex-col md:flex-row overflow-hidden">
       {/* Top bar for mobile */}
       <div className="md:hidden flex items-center justify-between p-4 border-b bg-background">
@@ -585,5 +598,6 @@ export function AdminLayout() {
         />
       )}
     </div>
+    </TooltipProvider>
   );
 }
