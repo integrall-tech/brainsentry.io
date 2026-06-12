@@ -125,6 +125,11 @@ services:
     ports:
       - "${BRAINSENTRY_BACKEND_PORT:-8081}:8081"
     environment:
+      # Liga as validações fail-closed do boot (recusa JWT secret default,
+      # demo auth; sslmode default vira require — o postgres do swarm não
+      # tem TLS, por isso o opt-out explícito logo abaixo).
+      - BRAINSENTRY_ENV=production
+      - DB_SSLMODE=disable
       - DB_HOST=brainsentry-postgres
       - DB_PORT=5432
       - DB_NAME=brainsentry
@@ -249,12 +254,13 @@ PGPASSWORD="$(cat secrets/brainsentry_postgres_password.txt)" psql \
   -h <swarm_manager_ip> -p 5445 -U brainsentry -d brainsentry \
   -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
-# Then apply every up migration in order.
-for n in 000001 000002 000003 000004 000005 000006 000007 000008 000009; do
+# Then apply every up migration in order. Don't hardcode the list — new
+# migrations land regularly; glob + sort keeps this current.
+for f in $(ls /tmp/migrations/*.up.sql | sort); do
   PGPASSWORD="$(cat secrets/brainsentry_postgres_password.txt)" psql \
     -h <swarm_manager_ip> -p 5445 -U brainsentry -d brainsentry \
     -v ON_ERROR_STOP=1 \
-    -f /tmp/migrations/${n}*.up.sql
+    -f "$f"
 done
 ```
 
