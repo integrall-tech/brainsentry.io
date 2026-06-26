@@ -174,6 +174,23 @@ func (s *InterceptionService) Intercept(ctx context.Context, req dto.InterceptRe
 		}
 	}
 
+	// Temporal recall: when the prompt names a time window ("o que deu errado
+	// ontem?", "últimos 7 dias"), pull memories recorded in that window and
+	// merge them in. Vector/text search is content-relevant but time-blind;
+	// this surfaces time-relevant memories they'd otherwise miss. Additive and
+	// deduped — non-temporal prompts are untouched.
+	if window, ok := ExtractTimeWindow(req.Prompt, time.Now()); ok {
+		ranged, err := s.memoryRepo.FindByRecordedRange(ctx, window.From, window.To, 10)
+		if err != nil {
+			slog.Warn("temporal recall failed", "window", window.Matched, "error", err)
+		} else {
+			before := len(memories)
+			memories = mergeMemoriesByID(memories, ranged)
+			slog.Info("temporal recall applied",
+				"window", window.Matched, "found", len(ranged), "added", len(memories)-before)
+		}
+	}
+
 	// Filter expired and superseded memories
 	memories = filterActiveMemories(memories)
 
@@ -322,6 +339,24 @@ func filterByImportance(memories []domain.Memory, max int) []domain.Memory {
 		return memories
 	}
 	return result
+}
+
+// mergeMemoriesByID appends `extra` to `base`, skipping IDs already present.
+// Order is preserved (base first) so existing relevance ranking is kept and
+// temporal results only fill gaps.
+func mergeMemoriesByID(base, extra []domain.Memory) []domain.Memory {
+	seen := make(map[string]struct{}, len(base))
+	for _, m := range base {
+		seen[m.ID] = struct{}{}
+	}
+	for _, m := range extra {
+		if _, ok := seen[m.ID]; ok {
+			continue
+		}
+		seen[m.ID] = struct{}{}
+		base = append(base, m)
+	}
+	return base
 }
 
 func filterActiveMemories(memories []domain.Memory) []domain.Memory {
