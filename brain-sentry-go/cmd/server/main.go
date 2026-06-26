@@ -247,7 +247,8 @@ func main() {
 	connectorRegistry := service.NewConnectorRegistry()
 	var connectorService *service.ConnectorService
 	if taskScheduler != nil {
-		connectorService = service.NewConnectorService(connectorRegistry, taskScheduler)
+		connectorService = service.NewConnectorService(connectorRegistry, taskScheduler).
+			WithMemoryService(memoryService)
 	}
 
 	// Benchmark Service
@@ -513,7 +514,13 @@ func main() {
 		taskScheduler.RegisterHandler(service.TaskTripletExtraction, extractionHandler)
 		taskScheduler.RegisterHandler(service.TaskEventExtraction, extractionHandler)
 		memoryService.WithTaskScheduler(taskScheduler)
-		logger.Info("extraction tasks routed through durable scheduler")
+
+		// Connector chunk ingestion: turn TaskEmbedding into memories. Without
+		// this handler the connector's submitted tasks would be dropped.
+		if connectorService != nil {
+			taskScheduler.RegisterHandler(service.TaskEmbedding, connectorService.EmbeddingTaskHandler())
+		}
+		logger.Info("extraction + connector tasks routed through durable scheduler")
 	}
 
 	logger.Info("Semantica-inspired services initialized",
