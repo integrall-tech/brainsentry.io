@@ -13,7 +13,6 @@ import (
 type PolicyHandler struct {
 	engine   *service.PolicyEngine
 	decision *service.DecisionService
-	repo     any // decision repo injected for Enforce
 }
 
 // NewPolicyHandler builds the handler.

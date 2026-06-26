@@ -208,7 +208,9 @@ func (s *MemoryService) CreateMemory(ctx context.Context, req dto.CreateMemoryRe
 				slog.Info("near-duplicate detected via SimHash", "existingId", existingID, "distance", SimHashHammingDistance(newHash, existingHash))
 				go func() {
 					bgCtx := tenant.WithTenant(context.Background(), tenant.FromContext(ctx))
-					s.memoryRepo.BoostAccessCount(bgCtx, existingID, 5)
+					if err := s.memoryRepo.BoostAccessCount(bgCtx, existingID, 5); err != nil {
+						slog.Warn("failed to boost access count", "memoryId", existingID, "error", err)
+					}
 				}()
 				existing, err := s.memoryRepo.FindByID(ctx, existingID)
 				if err == nil {
@@ -387,7 +389,9 @@ func (s *MemoryService) GetMemory(ctx context.Context, id string) (*domain.Memor
 	// Track access asynchronously
 	go func() {
 		bgCtx := tenant.WithTenant(context.Background(), m.TenantID)
-		s.memoryRepo.IncrementAccessCount(bgCtx, id)
+		if err := s.memoryRepo.IncrementAccessCount(bgCtx, id); err != nil {
+			slog.Warn("failed to increment access count", "memoryId", id, "error", err)
+		}
 	}()
 
 	return m, nil

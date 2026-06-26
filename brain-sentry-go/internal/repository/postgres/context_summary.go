@@ -46,18 +46,27 @@ func (r *ContextSummaryRepository) Create(ctx context.Context, cs *domain.Contex
 		return fmt.Errorf("creating context summary: %w", err)
 	}
 
-	// Save collection items
+	// Save collection items. A failure here leaves the summary partially
+	// persisted, so surface it rather than silently dropping rows.
 	for _, g := range cs.Goals {
-		r.pool.Exec(ctx, `INSERT INTO context_summary_goals (context_summary_id, goal) VALUES ($1, $2)`, cs.ID, g)
+		if _, err := r.pool.Exec(ctx, `INSERT INTO context_summary_goals (context_summary_id, goal) VALUES ($1, $2)`, cs.ID, g); err != nil {
+			return fmt.Errorf("saving context summary goal: %w", err)
+		}
 	}
 	for _, d := range cs.Decisions {
-		r.pool.Exec(ctx, `INSERT INTO context_summary_decisions (context_summary_id, decision) VALUES ($1, $2)`, cs.ID, d)
+		if _, err := r.pool.Exec(ctx, `INSERT INTO context_summary_decisions (context_summary_id, decision) VALUES ($1, $2)`, cs.ID, d); err != nil {
+			return fmt.Errorf("saving context summary decision: %w", err)
+		}
 	}
 	for _, e := range cs.Errors {
-		r.pool.Exec(ctx, `INSERT INTO context_summary_errors (context_summary_id, error) VALUES ($1, $2)`, cs.ID, e)
+		if _, err := r.pool.Exec(ctx, `INSERT INTO context_summary_errors (context_summary_id, error) VALUES ($1, $2)`, cs.ID, e); err != nil {
+			return fmt.Errorf("saving context summary error: %w", err)
+		}
 	}
 	for _, t := range cs.Todos {
-		r.pool.Exec(ctx, `INSERT INTO context_summary_todos (context_summary_id, todo) VALUES ($1, $2)`, cs.ID, t)
+		if _, err := r.pool.Exec(ctx, `INSERT INTO context_summary_todos (context_summary_id, todo) VALUES ($1, $2)`, cs.ID, t); err != nil {
+			return fmt.Errorf("saving context summary todo: %w", err)
+		}
 	}
 
 	return nil

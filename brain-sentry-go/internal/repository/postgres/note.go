@@ -48,12 +48,16 @@ func (r *NoteRepository) CreateNote(ctx context.Context, n *domain.Note) error {
 
 	// Save keywords
 	for _, kw := range n.Keywords {
-		r.pool.Exec(ctx, `INSERT INTO note_keywords (note_id, keyword) VALUES ($1, $2) ON CONFLICT DO NOTHING`, n.ID, kw)
+		if _, err := r.pool.Exec(ctx, `INSERT INTO note_keywords (note_id, keyword) VALUES ($1, $2) ON CONFLICT DO NOTHING`, n.ID, kw); err != nil {
+			return fmt.Errorf("saving note keyword: %w", err)
+		}
 	}
 
 	// Save related memories
 	for _, mid := range n.RelatedMemoryIDs {
-		r.pool.Exec(ctx, `INSERT INTO note_related_memories (note_id, memory_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, n.ID, mid)
+		if _, err := r.pool.Exec(ctx, `INSERT INTO note_related_memories (note_id, memory_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, n.ID, mid); err != nil {
+			return fmt.Errorf("saving note related memory: %w", err)
+		}
 	}
 
 	return nil
@@ -91,12 +95,16 @@ func (r *NoteRepository) CreateHindsightNote(ctx context.Context, n *domain.Hind
 
 	// Save tags
 	for _, tag := range n.Tags {
-		r.pool.Exec(ctx, `INSERT INTO hindsight_tags (hindsight_note_id, tag) VALUES ($1, $2) ON CONFLICT DO NOTHING`, n.ID, tag)
+		if _, err := r.pool.Exec(ctx, `INSERT INTO hindsight_tags (hindsight_note_id, tag) VALUES ($1, $2) ON CONFLICT DO NOTHING`, n.ID, tag); err != nil {
+			return fmt.Errorf("saving hindsight tag: %w", err)
+		}
 	}
 
 	// Save related memories
 	for _, mid := range n.RelatedMemoryIDs {
-		r.pool.Exec(ctx, `INSERT INTO hindsight_related_memories (hindsight_note_id, memory_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, n.ID, mid)
+		if _, err := r.pool.Exec(ctx, `INSERT INTO hindsight_related_memories (hindsight_note_id, memory_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, n.ID, mid); err != nil {
+			return fmt.Errorf("saving hindsight related memory: %w", err)
+		}
 	}
 
 	return nil

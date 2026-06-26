@@ -240,7 +240,9 @@ func (s *InterceptionService) Intercept(ctx context.Context, req dto.InterceptRe
 		// Track injection async
 		go func(id, tid string) {
 			bgCtx := tenant.WithTenant(context.Background(), tid)
-			s.memoryRepo.IncrementInjectionCount(bgCtx, id)
+			if err := s.memoryRepo.IncrementInjectionCount(bgCtx, id); err != nil {
+				slog.Warn("failed to increment injection count", "memoryId", id, "error", err)
+			}
 		}(m.ID, tenantID)
 	}
 	resp.MemoriesUsed = memRefs

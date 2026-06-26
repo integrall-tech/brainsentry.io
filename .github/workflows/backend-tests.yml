@@ -1,0 +1,66 @@
+name: Backend Tests
+
+# Roda em toda mudança do backend Go. Até agora o CI só fazia docker build —
+# toda a suíte de testes só rodava na máquina do dev. Este workflow é o gate
+# que garante build + vet + testes (-race) + lint verdes antes do merge.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'brain-sentry-go/**'
+      - '.github/workflows/backend-tests.yml'
+  pull_request:
+    paths:
+      - 'brain-sentry-go/**'
+      - '.github/workflows/backend-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: brain-sentry-go
+
+jobs:
+  test:
+    name: build · vet · test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: brain-sentry-go/go.mod
+          cache-dependency-path: brain-sentry-go/go.sum
+
+      - name: go build
+        run: go build ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test (race + short)
+        # -short pula os testes com build tag de integração (precisam de
+        # Postgres/FalkorDB reais); estes rodam no release-gate, não aqui.
+        run: go test ./... -short -race -count=1 -timeout=10m
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: brain-sentry-go/go.mod
+          cache-dependency-path: brain-sentry-go/go.sum
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          # Pinned: the repo's .golangci.yml uses the v1 config schema.
+          version: v1.64.8
+          working-directory: brain-sentry-go

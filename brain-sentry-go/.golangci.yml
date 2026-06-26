@@ -1,0 +1,41 @@
+# golangci-lint v1.64.x — gate de lint do backend.
+# Conjunto de alto sinal: os defaults do golangci (errcheck, govet,
+# ineffassign, staticcheck, unused, gosimple) sem linters exóticos que
+# gerariam ruído. Foco em código de produção; testes são mais tolerantes.
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosimple
+
+linters-settings:
+  errcheck:
+    # Padrões onde ignorar o erro é intencional e idiomático:
+    # serialização para ResponseWriter (headers já enviados, nada a fazer)
+    # e parsing best-effort de env vars.
+    exclude-functions:
+      - (*encoding/json.Encoder).Encode
+      - (*encoding/json.Decoder).Decode
+      - encoding/json.Unmarshal
+      - fmt.Sscanf
+      - (net/http.ResponseWriter).Write
+      # `defer tx.Rollback(ctx)` é idiomático — no-op se já houve commit.
+      - (github.com/jackc/pgx/v5.Tx).Rollback
+
+issues:
+  # Não esconder nenhum default por trás de "max-issues".
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-rules:
+    # Código de teste: scaffolding com contexto nil e helpers de
+    # encode/decode sem checagem de erro não são bugs de produção.
+    - path: _test\.go
+      linters:
+        - errcheck
+        - staticcheck

@@ -1,0 +1,21 @@
+# GitGuardian (ggshield) — varredura de segredos.
+# Resposta direta ao incidente da chave OpenRouter que vazou em commit
+# anterior (vista no application.yml legado). Roda no CI via secret-scan.yml.
+# Docs: https://docs.gitguardian.com/ggshield-docs/reference/secret/scan
+version: 2
+
+secret:
+  # Caminhos que legitimamente contêm placeholders/exemplos — não são segredos.
+  ignored-paths:
+    - "**/.env.example"
+    - "**/.env.template"
+    - ".env.production.example"
+    - "brain-sentry-frontend/e2e/**"      # fixtures de teste
+    - "brain-sentry-go/config.yaml"        # placeholders de dev (jwt_secret default etc.)
+    - "docker-compose.yml"
+    - "brain-sentry-go/docker-compose.yml"
+  # Detectores genéricos demais geram ruído em fixtures de teste.
+  ignored-detectors:
+    - generic_high_entropy_secret
+    - generic_password
+  show-secrets: false

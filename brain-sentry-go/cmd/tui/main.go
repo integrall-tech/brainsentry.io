@@ -29,10 +29,9 @@ func main() {
 	// Create HTTP client
 	c := client.New(serverURL, tenantID)
 
-	// Try to load saved token for auto-login
-	if err := c.LoadToken(tokenFile); err == nil {
-		// Token loaded, will be validated when first API call is made
-	}
+	// Try to load saved token for auto-login. A failure here just means no
+	// saved session; any loaded token is validated on the first API call.
+	_ = c.LoadToken(tokenFile)
 
 	// Create and run TUI
 	app := NewAppModel(c)

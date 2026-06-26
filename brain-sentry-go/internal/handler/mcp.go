@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -115,10 +116,14 @@ func HandleStdio(server *mcp.Server, reader io.Reader, writer io.Writer) error {
 			continue
 		}
 
-		resp := server.HandleMessage(nil, line)
+		resp := server.HandleMessage(context.Background(), line)
 		if resp != nil {
-			writer.Write(resp)
-			writer.Write([]byte("\n"))
+			if _, err := writer.Write(resp); err != nil {
+				return err
+			}
+			if _, err := writer.Write([]byte("\n")); err != nil {
+				return err
+			}
 		}
 	}
 	return scanner.Err()

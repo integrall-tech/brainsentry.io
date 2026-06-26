@@ -128,10 +128,12 @@ func (s *ReflectionService) RunReflection(ctx context.Context) (*ReflectionResul
 					}
 					meta["consolidated"] = true
 					meta["consolidatedAt"] = time.Now().Format(time.RFC3339)
-					s.memoryService.UpdateMemory(bgCtx, m.ID, dto.UpdateMemoryRequest{
+					if _, err := s.memoryService.UpdateMemory(bgCtx, m.ID, dto.UpdateMemoryRequest{
 						Metadata:     meta,
 						ChangeReason: "auto-reflection consolidation",
-					})
+					}); err != nil {
+						slog.Warn("reflection: failed to mark memory consolidated", "memoryId", m.ID, "error", err)
+					}
 				}
 			}(reflection, cluster.Memories)
 

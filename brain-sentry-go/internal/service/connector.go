@@ -185,11 +185,13 @@ func (s *ConnectorService) SyncConnector(ctx context.Context, connectorName stri
 		// Submit embedding tasks if scheduler available
 		if s.scheduler != nil {
 			for _, chunk := range chunks {
-				s.scheduler.Submit(ctx, TaskEmbedding, "", "", PriorityNormal, map[string]string{
+				if _, err := s.scheduler.Submit(ctx, TaskEmbedding, "", "", PriorityNormal, map[string]string{
 					"chunkId":    chunk.ID,
 					"documentId": chunk.DocumentID,
 					"content":    chunk.Content,
-				})
+				}); err != nil {
+					slog.Warn("connector: failed to submit embedding task", "chunkId", chunk.ID, "error", err)
+				}
 			}
 		}
 	}
