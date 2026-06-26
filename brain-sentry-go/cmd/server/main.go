@@ -503,6 +503,19 @@ func main() {
 	// Fire event extraction asynchronously after each memory create.
 	memoryService.WithEventExtractor(eventService)
 
+	// Route the heavy (LLM-bound) triplet/event extractions through the durable
+	// task scheduler when Redis is available, and register the handler that runs
+	// them. Without this registration the scheduler would drop these tasks, so the
+	// two must be wired together. Falls back to in-goroutine extraction when the
+	// scheduler is nil (no Redis).
+	if taskScheduler != nil {
+		extractionHandler := memoryService.ExtractionTaskHandler()
+		taskScheduler.RegisterHandler(service.TaskTripletExtraction, extractionHandler)
+		taskScheduler.RegisterHandler(service.TaskEventExtraction, extractionHandler)
+		memoryService.WithTaskScheduler(taskScheduler)
+		logger.Info("extraction tasks routed through durable scheduler")
+	}
+
 	logger.Info("Semantica-inspired services initialized",
 		"decisions", decisionService != nil,
 		"policies", policyEngine != nil,
