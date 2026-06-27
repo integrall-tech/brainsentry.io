@@ -64,3 +64,9 @@ jobs:
           # Pinned: the repo's .golangci.yml uses the v1 config schema.
           version: v1.64.8
           working-directory: brain-sentry-go
+          # Build the linter from source with the runner's Go (1.25) instead of
+          # the prebuilt binary (built with go1.24). The prebuilt v1.64.8 refuses
+          # to run when go.mod targets a newer Go: "the Go language version
+          # (go1.24) used to build golangci-lint is lower than the targeted Go
+          # version (1.25.0)". goinstall sidesteps the version-skew check.
+          install-mode: goinstall

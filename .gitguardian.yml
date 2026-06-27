@@ -6,7 +6,7 @@ version: 2
 
 secret:
   # Caminhos que legitimamente contêm placeholders/exemplos — não são segredos.
-  ignored-paths:
+  ignored_paths:
     - "**/.env.example"
     - "**/.env.template"
     - ".env.production.example"
@@ -15,7 +15,7 @@ secret:
     - "docker-compose.yml"
     - "brain-sentry-go/docker-compose.yml"
   # Detectores genéricos demais geram ruído em fixtures de teste.
-  ignored-detectors:
+  ignored_detectors:
     - generic_high_entropy_secret
     - generic_password
-  show-secrets: false
+  show_secrets: false
