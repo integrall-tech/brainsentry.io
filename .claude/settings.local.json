@@ -63,7 +63,22 @@
       "Bash(make tui-build:*)",
       "Bash(./bin/brainsentry-tui:*)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(VITE_API_URL=http://localhost:8082/api npm run dev)"
+      "Bash(VITE_API_URL=http://localhost:8082/api npm run dev)",
+      "Bash(git tag -a v0.1.0 -m 'Homologation v0.1.0 *)",
+      "Bash(gh run *)",
+      "Bash(ssh -i /Users/edsonmartins/IAT/IaT_aws_desenv.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 ec2-user@192.168.100.1 'echo \"=== uname ===\"; uname -a; echo; echo \"=== docker ===\"; docker --version; docker swarm ca 2>/dev/null | head -1 || echo \"swarm: NOT initialized OR not manager\"; echo; echo \"=== stacks rodando ===\"; docker stack ls 2>/dev/null || echo \"\\(no swarm\\)\"; echo; echo \"=== dev-env-devops services ===\"; docker service ls --filter \"label=com.docker.stack.namespace=devops\" --format \"table {{.Name}}\\\\t{{.Replicas}}\\\\t{{.Image}}\" 2>/dev/null | head; echo; echo \"=== overlay networks ===\"; docker network ls --filter \"driver=overlay\" --format \"{{.Name}}\"; echo; echo \"=== onde dev-env-devops está cloned? ===\"; find ~/ -maxdepth 4 -type d -name \"dev-env-devops\" 2>/dev/null | head -3')",
+      "Bash(ssh *)",
+      "Bash(gh api *)",
+      "Bash(gh pr *)",
+      "Bash(sed -i.bak 's|for i in $\\(seq 1 30\\); do|for _ in $\\(seq 1 30\\); do|' scripts/migrate.sh)",
+      "Bash(sed -i.bak 's|for i in $\\(seq 1 30\\); do|for _ in $\\(seq 1 30\\); do|' scripts/undeploy.sh)",
+      "Bash(sed -i.bak 's|for i in $\\(seq 1 60\\); do|for _ in $\\(seq 1 60\\); do|' scripts/deploy.sh)",
+      "Bash(rm scripts/*.bak)",
+      "Bash(shellcheck scripts/*.sh)",
+      "Bash(git fetch *)",
+      "Bash(git rebase *)",
+      "Bash(git stash *)",
+      "Bash(git checkout *)"
     ]
   }
 }
