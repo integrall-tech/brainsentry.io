@@ -105,6 +105,7 @@ Visão consolidada do que o Brain Sentry faz hoje, por área. Status:
 | Supersessão (`valid_from`/`valid_to`) | ✅ | automático + cascading staleness |
 | Consulta "as of" (ponto no tempo) | ✅ | `GET /v1/memories/as-of` |
 | Sync incremental (delta) | ✅ | `GET /v1/memories/changed-since` |
+| Recall por janela temporal (NL, pt-BR/en) | ✅ | automático no `POST /v1/intercept` |
 | Export de proveniência W3C PROV-O | ✅ | `/v1/export/provenance` |
 
 ### Grafo de Conhecimento
@@ -231,7 +232,7 @@ brainsentry.io/
 │   │   ├── repository/
 │   │   │   ├── postgres/          # PostgreSQL repositories + migrations
 │   │   │   └── graph/             # FalkorDB graph repositories
-│   │   └── service/               # Business logic (38 service files)
+│   │   └── service/               # Business logic (76 service files)
 │   │       ├── memory.go          # Core CRUD + hybrid search
 │   │       ├── interception.go    # Context injection pipeline
 │   │       ├── scoring.go         # Composite hybrid scoring
@@ -569,8 +570,9 @@ Funcionalidades avançadas inspiradas em 13 projetos open-source de memória par
 | NL para Cypher | Tradução de linguagem natural para consultas de grafo |
 | Louvain | Detecção de comunidades no grafo de memórias |
 | Cross-session | Pipeline de aprendizado entre sessões com lifecycle hooks |
-| Task scheduler | Redis Streams com prioridade por tenant e auto-recovery |
-| Conectores externos | GitHub, Notion, Google Drive, Web Crawler |
+| Recall temporal (NL) | Parser determinístico (regex, pt-BR/en) converte "ontem", "últimos 7 dias", "semana passada" em janela `recorded_at` e funde no recall — sem LLM |
+| Task scheduler durável | Redis Streams (prioridade por tenant + auto-recovery) processando extração de triplets/eventos e ingestão de conectores; fallback para goroutine quando não há Redis |
+| Conectores externos | GitHub, Notion, Google Drive, Web Crawler — chunks ingeridos como memórias tenant-scoped via task scheduler |
 | Benchmarking | Recall, Precision, F1, MRR, NDCG com datasets sintéticos |
 | Circuit breaker | Resiliência para serviços externos (CLOSED/OPEN/HALF_OPEN) |
 | PII detection | Mascaramento de dados sensíveis antes de enviar ao LLM |
@@ -731,7 +733,7 @@ curl http://localhost:8080/metrics
 ## Status
 
 ### Backend Go: 100% completo
-- 38 service files, 164 arquivos totais, ~30.000 linhas
+- 76 service files, ~30.000 linhas
 - Features cognitivas completas (Sprints A-E + Features Futuras)
 - MCP protocol server (JSON-RPC 2.0 + SSE)
 - Todos os testes passando
@@ -755,6 +757,7 @@ curl http://localhost:8080/metrics
 - `brain-sentry-explorer`: 107 steps de validação E2E contra API real
 - Benchmark de retrieval reprodutível (`npm run benchmark`)
 - ~50 testes unitários cobrindo trust score, ingestão, métricas e parsing
+- **CI por PR**: secret scanning (GitGuardian) + backend `build`/`vet`/`test -race`/`golangci-lint`
 
 ### Release atual: v0.2.0
 Inteligência de memória inspirada no comparativo com o memanto:
