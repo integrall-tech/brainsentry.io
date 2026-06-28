@@ -195,19 +195,6 @@ func (m *LoginModel) doLogin() tea.Cmd {
 	}
 }
 
-func (m *LoginModel) doDemoLogin() tea.Cmd {
-	m.loading = true
-	m.err = ""
-	c := m.client
-	return func() tea.Msg {
-		resp, err := c.LoginDemo()
-		if err != nil {
-			return LoginErrorMsg{Err: err}
-		}
-		return LoginSuccessMsg{Response: resp}
-	}
-}
-
 // View renders the login form.
 func (m LoginModel) View() string {
 	logoStyle := lipgloss.NewStyle().Foreground(theme.Primary).Bold(true)

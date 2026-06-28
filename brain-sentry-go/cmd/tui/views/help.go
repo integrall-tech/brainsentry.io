@@ -19,7 +19,7 @@ func HelpView(width, height int) string {
 		return helpKeyStyle.Render(key) + helpDescStyle.Render(desc) + "\n"
 	}
 
-	title := theme.TitleStyle.Copy().MarginBottom(1).Render("BrainSentry TUI - Keybindings")
+	title := theme.TitleStyle.MarginBottom(1).Render("BrainSentry TUI - Keybindings")
 
 	nav := theme.SectionStyle.Render("Navigation")
 	navKeys := helpEntry("1-5", "Switch view") +

@@ -243,7 +243,9 @@ func (s *SessionService) expireSession(ctx context.Context, session *domain.Sess
 	s.mu.Unlock()
 
 	if s.sessionRepo != nil {
-		s.sessionRepo.Update(ctx, session)
+		if err := s.sessionRepo.Update(ctx, session); err != nil {
+			slog.Warn("failed to persist session update", "sessionId", session.ID, "error", err)
+		}
 	}
 }
 

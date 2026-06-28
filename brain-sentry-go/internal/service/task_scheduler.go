@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -204,8 +205,12 @@ func (s *TaskScheduler) Start(ctx context.Context) error {
 		return nil
 	}
 
-	// Create consumer group (ignore error if already exists)
-	s.client.XGroupCreateMkStream(ctx, s.config.StreamName, s.config.GroupName, "0").Err()
+	// Create consumer group. BUSYGROUP (already exists) is expected and
+	// benign; anything else is a real setup failure worth surfacing.
+	if err := s.client.XGroupCreateMkStream(ctx, s.config.StreamName, s.config.GroupName, "0").Err(); err != nil &&
+		!strings.Contains(err.Error(), "BUSYGROUP") {
+		return fmt.Errorf("create consumer group: %w", err)
+	}
 
 	// Start workers
 	for i := 0; i < s.config.WorkerCount; i++ {

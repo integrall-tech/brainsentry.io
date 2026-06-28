@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/integraltech/brainsentry/internal/domain"
 	"github.com/integraltech/brainsentry/internal/dto"
@@ -291,10 +290,10 @@ func (s *ReconciliationService) executeDecision(ctx context.Context, decision *F
 		}
 		go func() {
 			bgCtx := tenant.WithTenant(context.Background(), tenantID)
-			now := time.Now()
 			// Supersede rather than hard-delete — preserve history
-			s.memoryRepo.SupersedeMemory(bgCtx, decision.ExistingMemoryID, "reconciliation:"+decision.Reason)
-			_ = now
+			if err := s.memoryRepo.SupersedeMemory(bgCtx, decision.ExistingMemoryID, "reconciliation:"+decision.Reason); err != nil {
+				slog.Warn("reconciliation: failed to supersede memory", "memoryId", decision.ExistingMemoryID, "error", err)
+			}
 		}()
 
 	case FactActionNone:

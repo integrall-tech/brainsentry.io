@@ -14,8 +14,19 @@ import (
 // PolicyEngine evaluates Policies against Decisions. Evaluation is in-process
 // with no network hop; rules are loaded from Postgres lazily and filtered by
 // the decision's category so only relevant policies fire.
+// policyRepository is the minimal repository surface used by PolicyEngine.
+// *postgres.PolicyRepository satisfies it; tests provide in-memory fakes.
+type policyRepository interface {
+	Create(ctx context.Context, p *domain.Policy) error
+	Update(ctx context.Context, p *domain.Policy) error
+	Delete(ctx context.Context, id string) error
+	FindByID(ctx context.Context, id string) (*domain.Policy, error)
+	ListForCategory(ctx context.Context, category string) ([]*domain.Policy, error)
+	ListAll(ctx context.Context) ([]*domain.Policy, error)
+}
+
 type PolicyEngine struct {
-	repo  *postgres.PolicyRepository
+	repo  policyRepository
 	audit *AuditService
 }
 

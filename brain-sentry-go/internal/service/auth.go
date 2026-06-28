@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/integraltech/brainsentry/internal/domain"
@@ -50,7 +51,8 @@ func (s *AuthService) Login(ctx context.Context, req dto.LoginRequest) (*dto.Log
 	now := time.Now()
 	user.LastLoginAt = &now
 	if err := s.userRepo.UpdateLastLogin(ctx, user.ID, now); err != nil {
-		// Non-fatal; log but don't fail login
+		// Non-fatal: the login still succeeds; just record the failure.
+		slog.Warn("failed to update last login timestamp", "userId", user.ID, "error", err)
 	}
 
 	token, err := s.jwtService.GenerateToken(user.ID, user.Email, user.TenantID, user.Roles)

@@ -17,6 +17,8 @@ interface UseWebSocketOptions {
   reconnect?: boolean;
   reconnectInterval?: number;
   maxRetries?: number;
+  /** Quando false, nunca conecta (status fica "disconnected"). */
+  enabled?: boolean;
 }
 
 export function useWebSocket({
@@ -28,6 +30,7 @@ export function useWebSocket({
   reconnect = true,
   reconnectInterval = 3000,
   maxRetries = 10,
+  enabled = true,
 }: UseWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
   const retriesRef = useRef(0);
@@ -105,11 +108,12 @@ export function useWebSocket({
   }, []);
 
   useEffect(() => {
+    if (!enabled) return;
     connect();
     return () => {
       disconnect();
     };
-  }, [connect, disconnect]);
+  }, [enabled, connect, disconnect]);
 
   return { status, lastMessage, send, connect, disconnect };
 }
