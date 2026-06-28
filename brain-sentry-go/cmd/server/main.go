@@ -247,7 +247,8 @@ func main() {
 	connectorRegistry := service.NewConnectorRegistry()
 	var connectorService *service.ConnectorService
 	if taskScheduler != nil {
-		connectorService = service.NewConnectorService(connectorRegistry, taskScheduler)
+		connectorService = service.NewConnectorService(connectorRegistry, taskScheduler).
+			WithMemoryService(memoryService)
 	}
 
 	// Benchmark Service
@@ -502,6 +503,25 @@ func main() {
 
 	// Fire event extraction asynchronously after each memory create.
 	memoryService.WithEventExtractor(eventService)
+
+	// Route the heavy (LLM-bound) triplet/event extractions through the durable
+	// task scheduler when Redis is available, and register the handler that runs
+	// them. Without this registration the scheduler would drop these tasks, so the
+	// two must be wired together. Falls back to in-goroutine extraction when the
+	// scheduler is nil (no Redis).
+	if taskScheduler != nil {
+		extractionHandler := memoryService.ExtractionTaskHandler()
+		taskScheduler.RegisterHandler(service.TaskTripletExtraction, extractionHandler)
+		taskScheduler.RegisterHandler(service.TaskEventExtraction, extractionHandler)
+		memoryService.WithTaskScheduler(taskScheduler)
+
+		// Connector chunk ingestion: turn TaskEmbedding into memories. Without
+		// this handler the connector's submitted tasks would be dropped.
+		if connectorService != nil {
+			taskScheduler.RegisterHandler(service.TaskEmbedding, connectorService.EmbeddingTaskHandler())
+		}
+		logger.Info("extraction + connector tasks routed through durable scheduler")
+	}
 
 	logger.Info("Semantica-inspired services initialized",
 		"decisions", decisionService != nil,

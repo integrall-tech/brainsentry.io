@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
@@ -140,11 +139,3 @@ func (h *AuditHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// auditLogToResponse converts domain to response (for future use).
-func auditLogToResponse(a any) any {
-	// AuditLog already serializes correctly with json tags
-	b, _ := json.Marshal(a)
-	var result map[string]any
-	json.Unmarshal(b, &result)
-	return result
-}

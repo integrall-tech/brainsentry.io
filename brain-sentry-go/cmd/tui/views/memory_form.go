@@ -116,7 +116,6 @@ func (m *MemoryFormModel) buildForm() *huh.Form {
 // Init initializes the form. If editing, loads the existing memory.
 func (m MemoryFormModel) Init() tea.Cmd {
 	if m.editID != "" {
-		m.loading = true
 		c := m.client
 		id := m.editID
 		return func() tea.Msg {

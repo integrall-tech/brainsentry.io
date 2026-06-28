@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/integraltech/brainsentry/internal/dto"
+	"github.com/integraltech/brainsentry/pkg/tenant"
 )
 
 // ConnectorType identifies the external source type.
@@ -137,6 +140,7 @@ func (r *ConnectorRegistry) List() map[string]Connector {
 type ConnectorService struct {
 	registry    *ConnectorRegistry
 	scheduler   *TaskScheduler
+	memoryService *MemoryService // ingestion target for chunks (set via WithMemoryService)
 	chunkSize   int // max tokens per chunk
 	chunkOverlap int // overlap tokens between chunks
 }
@@ -148,6 +152,62 @@ func NewConnectorService(registry *ConnectorRegistry, scheduler *TaskScheduler) 
 		scheduler:    scheduler,
 		chunkSize:    500,
 		chunkOverlap: 50,
+	}
+}
+
+// WithMemoryService sets the ingestion target. Required for EmbeddingTaskHandler
+// to turn document chunks into memories; without it the handler is a no-op error.
+func (s *ConnectorService) WithMemoryService(m *MemoryService) *ConnectorService {
+	s.memoryService = m
+	return s
+}
+
+// embeddingPayload is the scheduler payload for a connector chunk awaiting
+// ingestion. The tenant travels on the AsyncTask (task.TenantID), not here.
+type embeddingPayload struct {
+	ChunkID    string `json:"chunkId"`
+	DocumentID string `json:"documentId"`
+	Content    string `json:"content"`
+}
+
+// EmbeddingTaskHandler returns the TaskScheduler handler for TaskEmbedding. It
+// ingests a connector document chunk as a memory, reusing the full memory
+// pipeline (embedding generation, pgvector storage, graph + extraction). This is
+// what makes connector sync actually land data: without it, submitted embedding
+// tasks are acked and dropped. Register it for TaskEmbedding in the composition
+// root, after WithMemoryService.
+func (s *ConnectorService) EmbeddingTaskHandler() TaskHandler {
+	return func(ctx context.Context, task *AsyncTask) error {
+		if s.memoryService == nil {
+			return fmt.Errorf("connector embedding handler: memory service not configured")
+		}
+		var p embeddingPayload
+		if err := json.Unmarshal(task.Payload, &p); err != nil {
+			return fmt.Errorf("unmarshal embedding payload: %w", err)
+		}
+		if strings.TrimSpace(p.Content) == "" {
+			return nil // empty chunk, nothing to ingest
+		}
+		// A memory without a tenant would leak across tenants (see CLAUDE.md), so
+		// drop the task rather than create an unscoped memory.
+		if task.TenantID == "" {
+			slog.Warn("connector embedding task missing tenant; dropping", "chunkId", p.ChunkID)
+			return nil
+		}
+		bgCtx := tenant.WithTenant(ctx, task.TenantID)
+		_, err := s.memoryService.CreateMemory(bgCtx, dto.CreateMemoryRequest{
+			Content:    truncate(p.Content, 10000),
+			SourceType: "connector",
+			Metadata: map[string]any{
+				"source":     "connector",
+				"chunkId":    p.ChunkID,
+				"documentId": p.DocumentID,
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("create memory from chunk %s: %w", p.ChunkID, err)
+		}
+		return nil
 	}
 }
 
@@ -176,6 +236,10 @@ func (s *ConnectorService) SyncConnector(ctx context.Context, connectorName stri
 		return result, nil
 	}
 
+	// Carry the caller's tenant onto every task so the embedding handler creates
+	// tenant-scoped memories (the route is tenant-authenticated).
+	tenantID := tenant.FromContext(ctx)
+
 	// Process each document
 	for _, doc := range docs {
 		chunks := s.chunkDocument(doc)
@@ -185,11 +249,13 @@ func (s *ConnectorService) SyncConnector(ctx context.Context, connectorName stri
 		// Submit embedding tasks if scheduler available
 		if s.scheduler != nil {
 			for _, chunk := range chunks {
-				s.scheduler.Submit(ctx, TaskEmbedding, "", "", PriorityNormal, map[string]string{
-					"chunkId":    chunk.ID,
-					"documentId": chunk.DocumentID,
-					"content":    chunk.Content,
-				})
+				if _, err := s.scheduler.Submit(ctx, TaskEmbedding, tenantID, "", PriorityNormal, embeddingPayload{
+					ChunkID:    chunk.ID,
+					DocumentID: chunk.DocumentID,
+					Content:    chunk.Content,
+				}); err != nil {
+					slog.Warn("connector: failed to submit embedding task", "chunkId", chunk.ID, "error", err)
+				}
 			}
 		}
 	}

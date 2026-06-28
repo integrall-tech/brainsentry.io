@@ -9,7 +9,6 @@ import (
 // complementing PIIService which only masks. Stripping is more aggressive — data is gone.
 type PrivacyStrippingService struct {
 	pii             *PIIService
-	customPatterns  []*regexp.Regexp
 	privateTagRegex *regexp.Regexp
 	envVarRegex     *regexp.Regexp
 	secretPatterns  []*regexp.Regexp

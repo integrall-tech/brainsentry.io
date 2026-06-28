@@ -29,16 +29,6 @@ const auditColumns = `id, event_type, timestamp, user_id, session_id, user_reque
 	decision, reasoning, confidence, input_data, output_data,
 	latency_ms, llm_calls, tokens_used, outcome, error_message, user_feedback, tenant_id`
 
-func scanAuditLog(row pgx.Row) (*domain.AuditLog, error) {
-	var a domain.AuditLog
-	err := row.Scan(
-		&a.ID, &a.EventType, &a.Timestamp, &a.UserID, &a.SessionID, &a.UserRequest,
-		&a.Decision, &a.Reasoning, &a.Confidence, &a.InputData, &a.OutputData,
-		&a.LatencyMs, &a.LLMCalls, &a.TokensUsed, &a.Outcome, &a.ErrorMessage, &a.UserFeedback, &a.TenantID,
-	)
-	return &a, err
-}
-
 func scanAuditLogs(rows pgx.Rows) ([]domain.AuditLog, error) {
 	var logs []domain.AuditLog
 	for rows.Next() {

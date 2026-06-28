@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -34,6 +35,7 @@ type MemoryService struct {
 	stalenessSvc   *CascadingStalenessService    // propagates staleness on supersede
 	feedbackSvc    *FeedbackLearningService      // blends feedback into scoring
 	eventSvc       *EventService                 // async event extraction on create
+	scheduler      *TaskScheduler                // durable queue for heavy extractions (optional)
 }
 
 // WithCompressor enables LLM-driven content compression during CreateMemory.
@@ -76,6 +78,17 @@ func (s *MemoryService) WithFeedbackLearning(f *FeedbackLearningService) *Memory
 // The extraction runs in a detached goroutine so it never blocks the create path.
 func (s *MemoryService) WithEventExtractor(e *EventService) *MemoryService {
 	s.eventSvc = e
+	return s
+}
+
+// WithTaskScheduler routes the heavy (LLM-bound) extractions — triplets and
+// events — through the durable Redis-Streams queue instead of a fire-and-forget
+// goroutine, so a process crash mid-extraction is retried/recovered rather than
+// silently lost. When nil (no Redis), CreateMemory keeps the original goroutine
+// behavior. The composition root must also RegisterHandler for the extraction
+// task types, or the work would be dropped.
+func (s *MemoryService) WithTaskScheduler(ts *TaskScheduler) *MemoryService {
+	s.scheduler = ts
 	return s
 }
 
@@ -208,7 +221,9 @@ func (s *MemoryService) CreateMemory(ctx context.Context, req dto.CreateMemoryRe
 				slog.Info("near-duplicate detected via SimHash", "existingId", existingID, "distance", SimHashHammingDistance(newHash, existingHash))
 				go func() {
 					bgCtx := tenant.WithTenant(context.Background(), tenant.FromContext(ctx))
-					s.memoryRepo.BoostAccessCount(bgCtx, existingID, 5)
+					if err := s.memoryRepo.BoostAccessCount(bgCtx, existingID, 5); err != nil {
+						slog.Warn("failed to boost access count", "memoryId", existingID, "error", err)
+					}
 				}()
 				existing, err := s.memoryRepo.FindByID(ctx, existingID)
 				if err == nil {
@@ -332,49 +347,108 @@ func (s *MemoryService) CreateMemory(ctx context.Context, req dto.CreateMemoryRe
 		go s.auditService.LogMemoryCreated(tenant.WithTenant(context.Background(), m.TenantID), m)
 	}
 
-	// 3. Triplet extraction — async, non-blocking. Results stored in metadata.
+	// 3. Triplet extraction — heavy (LLM). Routed through the durable scheduler
+	// when available, else a detached goroutine. Results stored in metadata.
 	// (Triplet persistence to a dedicated table/collection is a future enhancement.)
 	if s.tripletSvc != nil {
-		go func() {
-			bgCtx := tenant.WithTenant(context.Background(), m.TenantID)
-			triplets, err := s.tripletSvc.ExtractAndBuild(bgCtx, m.ID, m.Content)
-			if err != nil {
-				slog.Warn("triplet extraction failed", "memoryId", m.ID, "error", err)
-				return
-			}
-			if len(triplets) == 0 {
-				return
-			}
-			// Merge triplet summaries into metadata for discoverability.
-			meta := make(map[string]any)
-			if len(m.Metadata) > 0 {
-				_ = json.Unmarshal(m.Metadata, &meta)
-			}
-			tripletSummaries := make([]string, 0, len(triplets))
-			for _, t := range triplets {
-				tripletSummaries = append(tripletSummaries, t.Text)
-			}
-			meta["triplets"] = tripletSummaries
-			meta["tripletCount"] = len(triplets)
-			if raw, err := json.Marshal(meta); err == nil {
-				m.Metadata = raw
-				_ = s.memoryRepo.Update(bgCtx, m)
-			}
-		}()
+		s.dispatchExtraction(ctx, TaskTripletExtraction, m.TenantID, m.ID, m.Content)
 	}
 
-	// 4. Event extraction — async, non-blocking. The LLM looks for structured
+	// 4. Event extraction — heavy (LLM). The model looks for structured
 	// occurrences inside the content and persists them with source_memory_id.
 	if s.eventSvc != nil {
-		go func() {
-			bgCtx := tenant.WithTenant(context.Background(), m.TenantID)
-			if _, err := s.eventSvc.ExtractFromText(bgCtx, m.Content, m.ID); err != nil {
-				slog.Warn("event extraction failed", "memoryId", m.ID, "error", err)
-			}
-		}()
+		s.dispatchExtraction(ctx, TaskEventExtraction, m.TenantID, m.ID, m.Content)
 	}
 
 	return m, nil
+}
+
+// dispatchExtraction enqueues a heavy extraction on the durable task scheduler,
+// falling back to a detached goroutine when no scheduler is configured or the
+// enqueue fails — so the work is never silently dropped on the create path.
+func (s *MemoryService) dispatchExtraction(ctx context.Context, taskType TaskType, tenantID, memoryID, content string) {
+	if s.scheduler != nil {
+		payload := extractionPayload{MemoryID: memoryID, Content: content}
+		if _, err := s.scheduler.Submit(ctx, taskType, tenantID, "", PriorityNormal, payload); err == nil {
+			return
+		}
+		slog.Warn("scheduler submit failed; running extraction inline", "type", taskType, "memoryId", memoryID)
+	}
+	go func() {
+		bgCtx := tenant.WithTenant(context.Background(), tenantID)
+		if err := s.runExtraction(bgCtx, taskType, memoryID, content); err != nil {
+			slog.Warn("extraction failed", "type", taskType, "memoryId", memoryID, "error", err)
+		}
+	}()
+}
+
+// runExtraction executes a single extraction by type. It is the shared body for
+// both the goroutine fallback above and the scheduler handler (extraction_tasks.go),
+// so the two paths can never diverge.
+func (s *MemoryService) runExtraction(ctx context.Context, taskType TaskType, memoryID, content string) error {
+	switch taskType {
+	case TaskTripletExtraction:
+		return s.runTripletExtraction(ctx, memoryID, content)
+	case TaskEventExtraction:
+		return s.runEventExtraction(ctx, memoryID, content)
+	default:
+		return fmt.Errorf("unknown extraction task type: %s", taskType)
+	}
+}
+
+// runTripletExtraction extracts S-P-O triplets and merges a summary into the
+// memory's metadata. It reloads the memory by ID (rather than capturing the
+// create-path pointer) so the durable handler is self-contained and there is no
+// data race against the value returned to the caller.
+func (s *MemoryService) runTripletExtraction(ctx context.Context, memoryID, content string) error {
+	if s.tripletSvc == nil {
+		return nil
+	}
+	triplets, err := s.tripletSvc.ExtractAndBuild(ctx, memoryID, content)
+	if err != nil {
+		return fmt.Errorf("triplet extraction: %w", err)
+	}
+	if len(triplets) == 0 {
+		return nil
+	}
+
+	m, err := s.memoryRepo.FindByID(ctx, memoryID)
+	if err != nil {
+		return fmt.Errorf("reload memory for triplet metadata: %w", err)
+	}
+
+	meta := make(map[string]any)
+	if len(m.Metadata) > 0 {
+		_ = json.Unmarshal(m.Metadata, &meta)
+	}
+	summaries := make([]string, 0, len(triplets))
+	for _, t := range triplets {
+		summaries = append(summaries, t.Text)
+	}
+	meta["triplets"] = summaries
+	meta["tripletCount"] = len(triplets)
+
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("marshal triplet metadata: %w", err)
+	}
+	m.Metadata = raw
+	if err := s.memoryRepo.Update(ctx, m); err != nil {
+		return fmt.Errorf("persist triplet metadata: %w", err)
+	}
+	return nil
+}
+
+// runEventExtraction extracts structured events from the content and persists
+// them with source_memory_id.
+func (s *MemoryService) runEventExtraction(ctx context.Context, memoryID, content string) error {
+	if s.eventSvc == nil {
+		return nil
+	}
+	if _, err := s.eventSvc.ExtractFromText(ctx, content, memoryID); err != nil {
+		return fmt.Errorf("event extraction: %w", err)
+	}
+	return nil
 }
 
 // GetMemory retrieves a memory by ID and tracks access.
@@ -387,7 +461,9 @@ func (s *MemoryService) GetMemory(ctx context.Context, id string) (*domain.Memor
 	// Track access asynchronously
 	go func() {
 		bgCtx := tenant.WithTenant(context.Background(), m.TenantID)
-		s.memoryRepo.IncrementAccessCount(bgCtx, id)
+		if err := s.memoryRepo.IncrementAccessCount(bgCtx, id); err != nil {
+			slog.Warn("failed to increment access count", "memoryId", id, "error", err)
+		}
 	}()
 
 	return m, nil
