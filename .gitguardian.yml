@@ -14,7 +14,15 @@ secret:
     - "brain-sentry-go/config.yaml"        # placeholders de dev (jwt_secret default etc.)
     - "docker-compose.yml"
     - "brain-sentry-go/docker-compose.yml"
+    # Compose de produção: todo valor sensível é ${VAR}/${VAR:?msg} vindo do
+    # .env — sem literais. O detector generic_password lê a MENSAGEM do
+    # fail-closed `${POSTGRES_PASSWORD:?defina ... no .env}` como se fosse senha
+    # (falso-positivo). Mantém a mesma política do docker-compose.yml acima.
+    - "docker-compose.production.yml"
   # Detectores genéricos demais geram ruído em fixtures de teste.
+  # NOTA: nesta versão do ggshield (1.52) `ignored_detectors` NÃO suprimiu o
+  # generic_password (ver run do #13) — ou seja, é config sem efeito prático.
+  # O bloqueio do generic_password é resolvido via ignored_paths acima, não aqui.
   ignored_detectors:
     - generic_high_entropy_secret
     - generic_password
