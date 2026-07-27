@@ -20,6 +20,13 @@ func NewMemoryGraphRepository(client *Client) *MemoryGraphRepository {
 	return &MemoryGraphRepository{client: client}
 }
 
+// EnsureVectorIndex satisfies rebuild.VectorIndexEnsurer so the rebuild can
+// put the index back after DropGraph removes it. Same DDL the server runs at
+// boot — see ensureVectorIndex.
+func (r *MemoryGraphRepository) EnsureVectorIndex(ctx context.Context, dimensions int) error {
+	return ensureVectorIndex(ctx, r.client, dimensions)
+}
+
 // DropGraph wipes the entire FalkorDB graph. Operator-only — wired into
 // the rebuild executor (internal/rebuild). See the system-of-record doc
 // for context.
@@ -113,7 +120,12 @@ ON MATCH SET r.strength = r.strength + 1, r.mentions = coalesce(r.mentions, 0) +
 
 // VectorSearch performs vector similarity search in the graph.
 func (r *MemoryGraphRepository) VectorSearch(ctx context.Context, embedding []float32, limit int, tenantID string) ([]string, []float64, error) {
-	embeddingStr := formatFloatList(embedding)
+	// vecf32() is required: db.idx.vector.queryNodes takes a vector, not a
+	// list of numbers. Passing the bare [0.1,0.2,...] makes FalkorDB reject
+	// the call with "Invalid arguments for procedure", which the fallback
+	// below swallows into a warning — so the symptom was never a hard error,
+	// just vector search silently degrading to access-count ranking forever.
+	embeddingStr := fmt.Sprintf("vecf32(%s)", formatFloatList(embedding))
 
 	// Try vector search first
 	cypher := fmt.Sprintf(`CALL db.idx.vector.queryNodes('Memory', 'embedding', %d, %s)

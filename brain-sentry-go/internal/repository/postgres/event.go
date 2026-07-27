@@ -25,8 +25,14 @@ func NewEventRepository(pool *pgxpool.Pool) *EventRepository {
 	return &EventRepository{pool: pool}
 }
 
+// eventColumns is the INSERT column list — bare names, no casts.
 const eventColumns = `id, tenant_id, event_type, title, description, occurred_at,
 	participants, attributes, source_memory_id, embedding, created_at`
+
+// eventSelectColumns casts embedding back to float4[] so pgx can scan it into
+// []float32 — pgvector's own text output is not scannable. See vector.go.
+var eventSelectColumns = `id, tenant_id, event_type, title, description, occurred_at,
+	participants, attributes, source_memory_id, ` + vectorSelect("embedding") + `, created_at`
 
 func scanEvent(row pgx.Row) (*domain.Event, error) {
 	var e domain.Event
@@ -70,17 +76,18 @@ func (r *EventRepository) Create(ctx context.Context, e *domain.Event) error {
 		sourceMemoryID = &e.SourceMemoryID
 	}
 
-	query := fmt.Sprintf(`INSERT INTO events (%s) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, eventColumns)
+	// $10::vector — see the note in vector.go on why the cast is required.
+	query := fmt.Sprintf(`INSERT INTO events (%s) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::vector,$11)`, eventColumns)
 	_, err := r.pool.Exec(ctx, query,
 		e.ID, e.TenantID, e.EventType, e.Title, e.Description, e.OccurredAt,
-		participants, attrs, sourceMemoryID, e.Embedding, e.CreatedAt)
+		participants, attrs, sourceMemoryID, vectorParam(e.Embedding), e.CreatedAt)
 	return err
 }
 
 // FindByID returns a single event.
 func (r *EventRepository) FindByID(ctx context.Context, id string) (*domain.Event, error) {
 	tenantID := tenant.FromContext(ctx)
-	query := fmt.Sprintf(`SELECT %s FROM events WHERE id=$1 AND tenant_id=$2`, eventColumns)
+	query := fmt.Sprintf(`SELECT %s FROM events WHERE id=$1 AND tenant_id=$2`, eventSelectColumns)
 	e, err := scanEvent(r.pool.QueryRow(ctx, query, id, tenantID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -126,7 +133,7 @@ func (r *EventRepository) List(ctx context.Context, f EventFilter) ([]*domain.Ev
 		limit = 100
 	}
 	query := fmt.Sprintf(`SELECT %s FROM events WHERE %s ORDER BY occurred_at DESC LIMIT %d`,
-		eventColumns, where, limit)
+		eventSelectColumns, where, limit)
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
