@@ -206,7 +206,25 @@ func TestMemoryHandler_Search_MissingQuery(t *testing.T) {
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("expected status 400, got %d", rr.Code)
 	}
-	assertErrorMessage(t, rr, "query is required")
+	assertErrorMessage(t, rr, "query is required unless sourceReference or metadata is given")
+}
+
+// The mirror of the above: an exact lookup carries its own target, so it must
+// NOT be rejected for having no query (RFC-014 fatia 1).
+func TestMemoryHandler_Search_ExactFilterNeedsNoQuery(t *testing.T) {
+	h := NewMemoryHandler(nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/memories/search",
+		strings.NewReader(`{"sourceReference":"decisao:123"}`))
+	rr := httptest.NewRecorder()
+
+	// The service is nil here, so reaching it panics — which is exactly the
+	// signal we want: getting past validation means the request was accepted.
+	defer func() {
+		if recover() == nil && rr.Code == http.StatusBadRequest {
+			t.Error("an exact lookup must not be rejected for missing query")
+		}
+	}()
+	h.Search(rr, req)
 }
 
 func TestMemoryHandler_Feedback_InvalidJSON(t *testing.T) {

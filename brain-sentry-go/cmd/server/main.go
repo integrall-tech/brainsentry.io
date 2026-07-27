@@ -946,6 +946,8 @@ func main() {
 			r.Post("/upload", memoryHandler.Upload)
 			r.Get("/", memoryHandler.List)
 			r.Post("/search", memoryHandler.Search)
+			// Bulk revocation for the audit routine (RFC-014 fatia 1).
+			r.Post("/batch-expire", memoryHandler.BatchExpire)
 			r.Get("/by-category/{category}", memoryHandler.GetByCategory)
 			r.Get("/by-importance/{importance}", memoryHandler.GetByImportance)
 			r.Get("/{id}", memoryHandler.GetByID)

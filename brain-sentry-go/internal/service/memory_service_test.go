@@ -10,6 +10,7 @@ import (
 
 	"github.com/integraltech/brainsentry/internal/domain"
 	"github.com/integraltech/brainsentry/internal/dto"
+	"github.com/integraltech/brainsentry/internal/repository/postgres"
 )
 
 // --- extractChainOfThought tests ---
@@ -299,6 +300,12 @@ type fakeMemoryRepository struct {
 	byID            map[string]*domain.Memory
 	fullTextResults []domain.Memory
 	fullTextQueries []string
+
+	exactCalls   []postgres.ExactFilter
+	exactResults []domain.Memory
+	exactErr     error
+	expireCalls  []batchExpireCall
+	expireErr    error
 }
 
 func (f *fakeMemoryRepository) Create(_ context.Context, m *domain.Memory) error {
@@ -372,6 +379,27 @@ func (f *fakeMemoryRepository) BoostAccessCount(_ context.Context, _ string, _ i
 
 func (f *fakeMemoryRepository) SupersedeMemory(_ context.Context, _ string, _ string) error {
 	return nil
+}
+
+// exactCalls records deterministic lookups so tests can assert that the
+// semantic path was not taken (and vice versa).
+func (f *fakeMemoryRepository) FindByExactFilter(_ context.Context, filter postgres.ExactFilter) ([]domain.Memory, error) {
+	f.exactCalls = append(f.exactCalls, filter)
+	return f.exactResults, f.exactErr
+}
+
+func (f *fakeMemoryRepository) BatchExpire(_ context.Context, ids []string, sourceReference, reason string) (*postgres.BatchExpireResult, error) {
+	f.expireCalls = append(f.expireCalls, batchExpireCall{IDs: ids, SourceReference: sourceReference, Reason: reason})
+	if f.expireErr != nil {
+		return nil, f.expireErr
+	}
+	return &postgres.BatchExpireResult{Expired: int64(len(ids)), IDs: ids}, nil
+}
+
+type batchExpireCall struct {
+	IDs             []string
+	SourceReference string
+	Reason          string
 }
 
 type fakeMemoryGraphRepository struct {
@@ -557,5 +585,144 @@ func TestSearchMemories_DeduplicatesVectorAndTextResults(t *testing.T) {
 	wantIDs := []string{"vector-duplicate", "vector-only", "text-only"}
 	if !reflect.DeepEqual(gotIDs, wantIDs) {
 		t.Fatalf("result IDs = %v, want %v", gotIDs, wantIDs)
+	}
+}
+
+// --- Deterministic retrieval (RFC-014 fatia 1) ---
+
+// countingEmbedder fails the test if it is used at all. The point of the
+// exact route is not that embedding is wasteful there — it is that ranking a
+// known key by similarity can return a DIFFERENT memory, which would make the
+// audit compare the wrong fact against its source.
+type countingEmbedder struct {
+	t     *testing.T
+	calls int
+}
+
+func (c *countingEmbedder) Embed(_ string) []float32 {
+	c.calls++
+	c.t.Error("exact search must not generate an embedding")
+	return []float32{1, 0, 0}
+}
+
+func (c *countingEmbedder) HasAPI() bool { return true }
+
+func TestSearchMemories_ExactBySourceReferenceSkipsEmbedding(t *testing.T) {
+	embedder := &countingEmbedder{t: t}
+	repo := &fakeMemoryRepository{
+		exactResults: []domain.Memory{
+			{ID: "m1", Content: "recusou SKU-9: nao trabalha com a marca", SourceReference: "decisao:123"},
+		},
+	}
+	svc := &MemoryService{memoryRepo: repo, embeddingService: embedder}
+
+	resp, err := svc.SearchMemories(context.Background(), dto.SearchRequest{
+		SourceReference: "decisao:123",
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+
+	if len(resp.Results) != 1 || resp.Results[0].ID != "m1" {
+		t.Fatalf("expected the memory of decisao:123, got %+v", resp.Results)
+	}
+	if embedder.calls != 0 {
+		t.Errorf("embedding was called %d times on an exact lookup", embedder.calls)
+	}
+	if len(repo.fullTextQueries) != 0 {
+		t.Errorf("exact lookup must not fall back to full-text search: %v", repo.fullTextQueries)
+	}
+	if len(repo.exactCalls) != 1 {
+		t.Fatalf("expected exactly one exact lookup, got %d", len(repo.exactCalls))
+	}
+	if repo.exactCalls[0].SourceReference != "decisao:123" {
+		t.Errorf("filter carried %q", repo.exactCalls[0].SourceReference)
+	}
+}
+
+func TestSearchMemories_ExactByMetadataSkipsEmbedding(t *testing.T) {
+	embedder := &countingEmbedder{t: t}
+	repo := &fakeMemoryRepository{}
+	svc := &MemoryService{memoryRepo: repo, embeddingService: embedder}
+
+	if _, err := svc.SearchMemories(context.Background(), dto.SearchRequest{
+		Metadata: map[string]string{"cliente": "acme"},
+	}); err != nil {
+		t.Fatalf("search: %v", err)
+	}
+
+	if len(repo.exactCalls) != 1 {
+		t.Fatalf("expected one exact lookup, got %d", len(repo.exactCalls))
+	}
+	if repo.exactCalls[0].Metadata["cliente"] != "acme" {
+		t.Errorf("metadata filter not propagated: %+v", repo.exactCalls[0].Metadata)
+	}
+}
+
+// The narrow guard: a plain query must keep taking the semantic route.
+func TestSearchMemories_WithoutExactFilterStaysSemantic(t *testing.T) {
+	repo := &fakeMemoryRepository{
+		fullTextResults: []domain.Memory{{ID: "m1", Content: "algo"}},
+	}
+	svc := &MemoryService{memoryRepo: repo, embeddingService: fakeEmbeddingGenerator{api: false}}
+
+	if _, err := svc.SearchMemories(context.Background(), dto.SearchRequest{Query: "marca"}); err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(repo.exactCalls) != 0 {
+		t.Errorf("a plain query must not take the exact route")
+	}
+}
+
+func TestSearchRequest_IsExact(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		req  dto.SearchRequest
+		want bool
+	}{
+		{"source reference", dto.SearchRequest{SourceReference: "decisao:1"}, true},
+		{"metadata", dto.SearchRequest{Metadata: map[string]string{"k": "v"}}, true},
+		{"both", dto.SearchRequest{SourceReference: "d:1", Metadata: map[string]string{"k": "v"}}, true},
+		{"query only", dto.SearchRequest{Query: "marca"}, false},
+		{"empty metadata map", dto.SearchRequest{Metadata: map[string]string{}}, false},
+		{"nothing", dto.SearchRequest{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.req.IsExact(); got != tc.want {
+				t.Errorf("IsExact() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// --- Batch expire ---
+
+func TestBatchExpireMemories_RequiresSelectorAndReason(t *testing.T) {
+	svc := &MemoryService{memoryRepo: &fakeMemoryRepository{}}
+
+	if _, err := svc.BatchExpireMemories(context.Background(), dto.BatchExpireRequest{Reason: "x"}); err == nil {
+		t.Error("expiring with no ids and no sourceReference must be refused — it would match nothing or everything")
+	}
+	if _, err := svc.BatchExpireMemories(context.Background(), dto.BatchExpireRequest{Ids: []string{"m1"}}); err == nil {
+		t.Error("a bulk revocation with no reason is unauditable and must be refused")
+	}
+}
+
+func TestBatchExpireMemories_PassesSelectorThrough(t *testing.T) {
+	repo := &fakeMemoryRepository{}
+	svc := &MemoryService{memoryRepo: repo}
+
+	result, err := svc.BatchExpireMemories(context.Background(), dto.BatchExpireRequest{
+		Ids:    []string{"m1", "m2"},
+		Reason: "decisao revertida",
+	})
+	if err != nil {
+		t.Fatalf("batch expire: %v", err)
+	}
+	if result.Expired != 2 {
+		t.Errorf("expected 2 expired, got %d", result.Expired)
+	}
+	if len(repo.expireCalls) != 1 || repo.expireCalls[0].Reason != "decisao revertida" {
+		t.Errorf("reason not propagated: %+v", repo.expireCalls)
 	}
 }
