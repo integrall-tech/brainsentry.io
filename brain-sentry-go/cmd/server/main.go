@@ -126,6 +126,7 @@ func main() {
 	userRepo := postgres.NewUserRepository(pool)
 	tenantRepo := postgres.NewTenantRepository(pool)
 	apiKeyRepo := postgres.NewAPIKeyRepository(pool)
+	receiptRepo := postgres.NewReceiptRepository(pool)
 	memoryRepo := postgres.NewMemoryRepository(pool)
 	auditRepo := postgres.NewAuditRepository(pool)
 	versionRepo := postgres.NewVersionRepository(pool)
@@ -568,6 +569,10 @@ func main() {
 	tenantHandler := handler.NewTenantHandler(tenantRepo)
 	apiKeyService := service.NewAPIKeyService(apiKeyRepo)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
+	// Retention + data-subject erasure (RFC-014 §10). memoryGraphRepo may be
+	// nil when FalkorDB is down; the service reports that instead of failing.
+	retentionService := service.NewRetentionService(memoryRepo, memoryGraphRepo, tenantRepo, receiptRepo)
+	retentionHandler := handler.NewRetentionHandler(retentionService, receiptRepo)
 	memoryHandler := handler.NewMemoryHandler(memoryService, relationshipService)
 	auditHandler := handler.NewAuditHandler(auditService)
 	statsHandler := handler.NewStatsHandler(memoryRepo, auditRepo)
@@ -934,6 +939,16 @@ func main() {
 			r.With(middleware.RejectServicePrincipal, middleware.RequireRole(middleware.RoleAdmin)).
 				Get("/{id}/api-keys", apiKeyHandler.List)
 		})
+
+		// Retention + data-subject erasure (RFC-014 §10). Reachable by the
+		// tenant's service key: the Core receives the customer's removal
+		// request, and the key is pinned to one tenant, so it can only erase
+		// its own data. Destructive only with "confirm": true in the body.
+		r.Route("/v1/privacy", func(r chi.Router) {
+			r.Post("/erasure", retentionHandler.Erase)
+			r.Get("/receipts", retentionHandler.ListReceipts)
+		})
+		r.Post("/v1/retention/run", retentionHandler.RunRetention)
 
 		r.Route("/v1/api-keys", func(r chi.Router) {
 			r.With(middleware.RejectServicePrincipal, middleware.RequireRole(middleware.RoleAdmin)).

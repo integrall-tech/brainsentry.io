@@ -34,6 +34,31 @@ func (r *MemoryGraphRepository) DropGraph(ctx context.Context) error {
 	return r.client.DropGraph(ctx)
 }
 
+// PurgeMemoryNodes deletes Memory nodes (and their edges) by id.
+//
+// The graph is a derived cache, but not an innocent one for privacy: SaveToGraph
+// copies content and summary onto the node (see above), so a data-subject
+// erasure that only cleaned Postgres would leave the subject's text living in
+// FalkorDB until the next rebuild — and a rebuild only removes it because the
+// source row is gone, which is far too subtle to rely on.
+//
+// Scoped by tenantId AND id: the graph is single, shared across tenants, and
+// isolation there is a Cypher filter rather than a structure (see the
+// baseline's known risks). A delete is the worst place to omit it.
+func (r *MemoryGraphRepository) PurgeMemoryNodes(ctx context.Context, tenantID string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	cypher := fmt.Sprintf(`MATCH (m:Memory) WHERE m.tenantId = '%s' AND m.id IN %s DETACH DELETE m`,
+		EscapeCypher(tenantID), formatStringList(ids))
+
+	if _, err := r.client.Query(ctx, cypher); err != nil {
+		return fmt.Errorf("purging memory nodes from graph: %w", err)
+	}
+	return nil
+}
+
 // SaveToGraph stores or updates a memory node in the graph.
 func (r *MemoryGraphRepository) SaveToGraph(ctx context.Context, m *domain.Memory) error {
 	tagsStr := formatStringList(m.Tags)
