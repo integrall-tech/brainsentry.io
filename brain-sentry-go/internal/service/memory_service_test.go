@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
 	"testing"
@@ -306,11 +307,67 @@ type fakeMemoryRepository struct {
 	exactErr     error
 	expireCalls  []batchExpireCall
 	expireErr    error
+
+	// Dedup bookkeeping. dedupFilters records every filter the service asked
+	// for — the service's side of the contract is WHICH scope it requests.
+	dedupFilters []postgres.DedupCandidateFilter
+	seq          int
+	bySourceRef  map[string]*domain.Memory
+}
+
+// FindDedupCandidates mimics the repository's scoping so a service test can
+// assert end-to-end behaviour: a memory only qualifies when it carries every
+// tag the caller declared. The SQL that implements this for real is exercised
+// against a live schema, not here.
+func (f *fakeMemoryRepository) FindDedupCandidates(_ context.Context, filter postgres.DedupCandidateFilter) (map[string]string, error) {
+	f.dedupFilters = append(f.dedupFilters, filter)
+
+	out := map[string]string{}
+	for id, m := range f.byID {
+		if m.SimHash == "" {
+			continue
+		}
+		if !hasAllTags(m.Tags, filter.ScopeTags) {
+			continue
+		}
+		out[id] = m.SimHash
+	}
+	return out, nil
+}
+
+func hasAllTags(have, want []string) bool {
+	for _, w := range want {
+		found := false
+		for _, h := range have {
+			if h == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func (f *fakeMemoryRepository) FindBySourceReference(_ context.Context, sourceReference string) (*domain.Memory, error) {
+	if sourceReference == "" || f.bySourceRef == nil {
+		return nil, nil
+	}
+	return f.bySourceRef[sourceReference], nil
 }
 
 func (f *fakeMemoryRepository) Create(_ context.Context, m *domain.Memory) error {
 	if f.byID == nil {
 		f.byID = make(map[string]*domain.Memory)
+	}
+	// The real repository assigns an id here. Without it every created memory
+	// lands under the key "" and two distinct memories look like one — which
+	// silently weakens any test that counts rows or compares ids.
+	if m.ID == "" {
+		f.seq++
+		m.ID = fmt.Sprintf("mem-%d", f.seq)
 	}
 	copyMemory := *m
 	f.byID[m.ID] = &copyMemory
@@ -724,5 +781,155 @@ func TestBatchExpireMemories_PassesSelectorThrough(t *testing.T) {
 	}
 	if len(repo.expireCalls) != 1 || repo.expireCalls[0].Reason != "decisao revertida" {
 		t.Errorf("reason not propagated: %+v", repo.expireCalls)
+	}
+}
+
+// --- Dedup escopado e idempotência (correções pré-Fatia B) ---
+
+// O caso que motivou a correção: os fatos do VendaX são templates preenchidos
+// por evento, um por cliente, e o texto de dois clientes diferentes é
+// frequentemente IDÊNTICO. Antes, o segundo POST caía em distância 0, não
+// criava nada e devolvia o id de uma memória do OUTRO cliente — falha
+// silenciosa no eixo mais sensível da integração.
+func TestCreateMemory_IdenticalContentDifferentClientsCoexist(t *testing.T) {
+	repo := &fakeMemoryRepository{}
+	svc := &MemoryService{memoryRepo: repo}
+
+	const fato = "recusou SKU-9182: nao trabalha com a marca"
+
+	first, err := svc.CreateMemory(context.Background(), dto.CreateMemoryRequest{
+		Content: fato,
+		Tags:    []string{"cliente:acme-001", "tipo:recusa"},
+	})
+	if err != nil {
+		t.Fatalf("primeira memoria: %v", err)
+	}
+
+	second, err := svc.CreateMemory(context.Background(), dto.CreateMemoryRequest{
+		Content: fato,
+		Tags:    []string{"cliente:beta-002", "tipo:recusa"},
+	})
+	if err != nil {
+		t.Fatalf("segunda memoria: %v", err)
+	}
+
+	if first.ID == second.ID {
+		t.Fatal("clientes diferentes com texto identico foram deduplicados — o fato do segundo cliente sumiu")
+	}
+	if len(repo.byID) != 2 {
+		t.Errorf("esperava 2 memorias, tem %d", len(repo.byID))
+	}
+	// Cada uma tem que ficar com a SUA tag de cliente.
+	if !hasAllTags(first.Tags, []string{"cliente:acme-001"}) ||
+		!hasAllTags(second.Tags, []string{"cliente:beta-002"}) {
+		t.Errorf("tags trocadas: %v / %v", first.Tags, second.Tags)
+	}
+}
+
+// O comportamento que continua desejável: o MESMO cliente reescrevendo o
+// MESMO fato ainda deduplica. O defeito era o escopo, não a existência.
+func TestCreateMemory_SameContentSameClientStillDeduplicates(t *testing.T) {
+	repo := &fakeMemoryRepository{}
+	svc := &MemoryService{memoryRepo: repo}
+
+	const fato = "recusou SKU-9182: nao trabalha com a marca"
+	tags := []string{"cliente:acme-001", "tipo:recusa"}
+
+	first, err := svc.CreateMemory(context.Background(), dto.CreateMemoryRequest{Content: fato, Tags: tags})
+	if err != nil {
+		t.Fatalf("primeira: %v", err)
+	}
+	second, err := svc.CreateMemory(context.Background(), dto.CreateMemoryRequest{Content: fato, Tags: tags})
+	if err != nil {
+		t.Fatalf("segunda: %v", err)
+	}
+
+	if first.ID != second.ID {
+		t.Error("mesmo cliente e mesmo texto deveriam deduplicar")
+	}
+	if len(repo.byID) != 1 {
+		t.Errorf("esperava 1 memoria, tem %d", len(repo.byID))
+	}
+}
+
+// O escopo pedido ao repositório precisa vir das tags da REQUISIÇÃO, não das
+// da memória: o compressor acrescenta tags do LLM antes do dedup, e elas não
+// são determinísticas — escopar por elas faria o mesmo fato não deduplicar
+// contra si mesmo.
+func TestCreateMemory_DedupScopeUsesRequestTags(t *testing.T) {
+	repo := &fakeMemoryRepository{}
+	svc := &MemoryService{memoryRepo: repo}
+
+	tags := []string{"cliente:acme-001", "tipo:recusa"}
+	if _, err := svc.CreateMemory(context.Background(), dto.CreateMemoryRequest{
+		Content: "algum fato", Tags: tags,
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if len(repo.dedupFilters) != 1 {
+		t.Fatalf("esperava uma consulta de dedup, houve %d", len(repo.dedupFilters))
+	}
+	if !reflect.DeepEqual(repo.dedupFilters[0].ScopeTags, tags) {
+		t.Errorf("escopo = %v, esperado %v", repo.dedupFilters[0].ScopeTags, tags)
+	}
+	if repo.dedupFilters[0].SimHash == "" {
+		t.Error("o filtro precisa carregar o SimHash para o pre-filtro por blocos")
+	}
+}
+
+// Origem distinta = fato distinto por construção. Similaridade textual não
+// tem voto, então o dedup nem é consultado.
+func TestCreateMemory_SourceReferenceSkipsDedupEntirely(t *testing.T) {
+	repo := &fakeMemoryRepository{}
+	svc := &MemoryService{memoryRepo: repo}
+
+	if _, err := svc.CreateMemory(context.Background(), dto.CreateMemoryRequest{
+		Content: "recusou SKU-9182", SourceReference: "decisao:1",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.CreateMemory(context.Background(), dto.CreateMemoryRequest{
+		Content: "recusou SKU-9182", SourceReference: "decisao:2",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if len(repo.dedupFilters) != 0 {
+		t.Errorf("com sourceReference o dedup nao deveria ser consultado; foi %d vez(es)", len(repo.dedupFilters))
+	}
+	if len(repo.byID) != 2 {
+		t.Errorf("origens distintas devem produzir 2 memorias, tem %d", len(repo.byID))
+	}
+}
+
+// O outbox do Core é at-least-once: a mesma origem chegando duas vezes tem que
+// devolver o MESMO id, nunca criar um segundo fato.
+func TestCreateMemory_SameSourceReferenceIsIdempotent(t *testing.T) {
+	repo := &fakeMemoryRepository{bySourceRef: map[string]*domain.Memory{}}
+	svc := &MemoryService{memoryRepo: repo}
+
+	first, err := svc.CreateMemory(context.Background(), dto.CreateMemoryRequest{
+		Content: "recusou SKU-9182", SourceReference: "decisao:8f2a",
+	})
+	if err != nil {
+		t.Fatalf("primeira: %v", err)
+	}
+	// Simula o que o repositório real faria: a origem passa a resolver para a
+	// memória criada.
+	repo.bySourceRef["decisao:8f2a"] = first
+
+	second, err := svc.CreateMemory(context.Background(), dto.CreateMemoryRequest{
+		Content: "recusou SKU-9182", SourceReference: "decisao:8f2a",
+	})
+	if err != nil {
+		t.Fatalf("retentativa: %v", err)
+	}
+
+	if first.ID != second.ID {
+		t.Errorf("a retentativa criou outro fato (%s != %s)", first.ID, second.ID)
+	}
+	if len(repo.byID) != 1 {
+		t.Errorf("esperava 1 memoria apos a retentativa, tem %d", len(repo.byID))
 	}
 }

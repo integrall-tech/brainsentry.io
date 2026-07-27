@@ -1302,3 +1302,46 @@ func assertErrorMessage(t *testing.T, rr *httptest.ResponseRecorder, want string
 		t.Errorf("expected message %q, got %q", want, resp.Message)
 	}
 }
+
+// Enum inválido tem que dar 400 e não 201. Antes, o valor era aceito, gravado,
+// e depois não casava com filtro nenhum — o dado existia e era invisível.
+func TestMemoryHandler_Create_RejectsUnknownEnums(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		{"importance", `{"content":"x","importance":"NORMAL"}`, "importance"},
+		{"category", `{"content":"x","category":"INVENTADA"}`, "category"},
+		{"provenance", `{"content":"x","provenance":"CHUTE"}`, "provenance"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewMemoryHandler(nil, nil)
+			req := httptest.NewRequest(http.MethodPost, "/v1/memories", strings.NewReader(tc.body))
+			rr := httptest.NewRecorder()
+
+			h.Create(rr, req)
+
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("esperava 400 para %s invalido, veio %d", tc.name, rr.Code)
+			}
+			if !strings.Contains(rr.Body.String(), tc.want) {
+				t.Errorf("a mensagem deveria dizer qual campo esta errado: %s", rr.Body.String())
+			}
+		})
+	}
+}
+
+// "NORMAL" é o valor que a própria documentação chegou a sugerir por engano —
+// vale um caso explícito para ele não voltar.
+func TestMemoryHandler_Create_AcceptsValidEnums(t *testing.T) {
+	h := NewMemoryHandler(nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/memories",
+		strings.NewReader(`{"content":"x","importance":"IMPORTANT","category":"DECISION","provenance":"EXPLICIT"}`))
+	rr := httptest.NewRecorder()
+
+	// O service é nil, então passar da validação chega a um panic — que é
+	// justamente o sinal de que os enums foram aceitos.
+	defer func() {
+		if recover() == nil && rr.Code == http.StatusBadRequest {
+			t.Error("enums validos foram rejeitados")
+		}
+	}()
+	h.Create(rr, req)
+}

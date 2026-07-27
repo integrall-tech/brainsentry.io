@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -767,4 +768,103 @@ func MemoryToJSON(data map[string]any) json.RawMessage {
 	}
 	b, _ := json.Marshal(data)
 	return b
+}
+
+// DedupCandidateFilter narrows the near-duplicate search for a create.
+//
+// Exists because the old dedup compared a candidate against EVERY memory of
+// the tenant. With the VendaX write pattern — the same sentence template
+// filled per customer — two different customers produce byte-identical
+// content, so the tenant-wide comparison silently suppressed the second
+// customer's fact and returned the first customer's memory id.
+type DedupCandidateFilter struct {
+	// SimHash of the candidate, hex. Used for the block prefilter.
+	SimHash string
+	// ScopeTags are the tags the CALLER declared on the request. Only
+	// memories carrying all of them can be duplicates.
+	//
+	// Deliberately the request's tags, not the memory's: the LLM compressor
+	// appends tags before dedup runs, and those are not deterministic — the
+	// same fact written twice could end up with different enriched tags and
+	// never deduplicate.
+	ScopeTags []string
+}
+
+// FindDedupCandidates returns (id, sim_hash) of memories that could be
+// near-duplicates of the candidate, within the caller's tenant.
+//
+// Two prefilters, both lossless:
+//
+//  1. Scope: when the candidate declares tags, only memories carrying ALL of
+//     them qualify. Two customers' memories are never duplicates of each
+//     other, however identical the text.
+//  2. SimHash blocks: the hash is 64 bits and the threshold is Hamming <= 3.
+//     Split into four 16-bit blocks, three differing bits cannot touch all
+//     four — at least one block matches exactly. So "some block matches"
+//     never discards a candidate the full comparison would have accepted.
+//
+// The caller still does the exact Hamming comparison; this only stops the
+// query from reading the whole tenant.
+func (r *MemoryRepository) FindDedupCandidates(ctx context.Context, f DedupCandidateFilter) (map[string]string, error) {
+	if len(f.SimHash) != 16 {
+		// Not a hash we can bucket: fall back to the unfiltered scan rather
+		// than silently returning nothing (which would disable dedup).
+		return r.FindSimHashes(ctx)
+	}
+
+	tenantID := tenant.FromContext(ctx)
+	args := []any{tenantID,
+		f.SimHash[0:4], f.SimHash[4:8], f.SimHash[8:12], f.SimHash[12:16]}
+
+	query := `SELECT m.id, m.sim_hash FROM memories m
+		WHERE m.tenant_id = $1 AND m.deleted_at IS NULL AND m.sim_hash <> ''
+		  AND (substr(m.sim_hash,1,4) = $2 OR substr(m.sim_hash,5,4) = $3
+		    OR substr(m.sim_hash,9,4) = $4 OR substr(m.sim_hash,13,4) = $5)`
+
+	if len(f.ScopeTags) > 0 {
+		args = append(args, f.ScopeTags, len(f.ScopeTags))
+		query += fmt.Sprintf(` AND (
+			SELECT count(DISTINCT mt.tag) FROM memory_tags mt
+			WHERE mt.memory_id = m.id AND mt.tag = ANY($%d)) = $%d`,
+			len(args)-1, len(args))
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("finding dedup candidates: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]string)
+	for rows.Next() {
+		var id, hash string
+		if err := rows.Scan(&id, &hash); err != nil {
+			return nil, err
+		}
+		result[id] = hash
+	}
+	return result, rows.Err()
+}
+
+// FindBySourceReference returns the live memory produced by a domain event,
+// or nil when there is none.
+//
+// Backs idempotency: the Core's outbox is at-least-once, so the same event can
+// arrive twice. One origin, one memory.
+func (r *MemoryRepository) FindBySourceReference(ctx context.Context, sourceReference string) (*domain.Memory, error) {
+	if sourceReference == "" {
+		return nil, nil
+	}
+	query := fmt.Sprintf(`SELECT %s FROM memories
+		WHERE tenant_id = $1 AND source_reference = $2 AND deleted_at IS NULL
+		ORDER BY created_at ASC LIMIT 1`, memoryColumns)
+
+	m, err := scanMemory(r.pool.QueryRow(ctx, query, tenant.FromContext(ctx), sourceReference))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil // no memory for this origin yet — not an error
+		}
+		return nil, fmt.Errorf("finding memory by source reference: %w", err)
+	}
+	return m, nil
 }

@@ -172,3 +172,38 @@ const (
 	SeverityMedium   NoteSeverity = "MEDIUM"
 	SeverityLow      NoteSeverity = "LOW"
 )
+
+// Valid reports whether the level is one the system actually understands.
+//
+// Exists because these enums arrive as free-form strings over JSON and NOTHING
+// validated them: a value outside the set was accepted, stored, and then
+// matched no filter — the row existed and was invisible. Failing the request is
+// cheaper than a fact nobody can find.
+func (i ImportanceLevel) Valid() bool {
+	switch i {
+	case ImportanceCritical, ImportanceImportant, ImportanceMinor:
+		return true
+	}
+	return false
+}
+
+// Valid reports whether the category is a known one.
+func (c MemoryCategory) Valid() bool {
+	switch c {
+	case CategoryInsight, CategoryDecision, CategoryWarning, CategoryKnowledge,
+		CategoryAction, CategoryContext, CategoryReference, CategoryPattern,
+		CategoryAntipattern, CategoryDomain, CategoryBug:
+		return true
+	}
+	return false
+}
+
+// Valid reports whether the provenance is a known one.
+func (p Provenance) Valid() bool {
+	switch p {
+	case ProvenanceExplicit, ProvenanceValidated, ProvenanceCorrected,
+		ProvenanceObserved, ProvenanceImported, ProvenanceInferred:
+		return true
+	}
+	return false
+}
