@@ -87,7 +87,12 @@ jobs:
             echo "DEPLOY_TOKEN não configurado — pulando o deploy automático."
             exit 0
           fi
-          curl -fsS --max-time 30 https://deploy.brainsentry.com.br/hooks/deploy \
+          # Mesmo retry do build-backend-image.yml: a chamada ao webhook falhou
+          # por timeout de rede na primeira execucao real, com a imagem ja
+          # publicada. Ver a nota la para o racional.
+          curl -fsS --retry 4 --retry-delay 15 --retry-all-errors \
+            --connect-timeout 10 --max-time 30 \
+            https://deploy.brainsentry.com.br/hooks/deploy \
             -H "X-Deploy-Token: $DEPLOY_TOKEN" \
             -H 'Content-Type: application/json' \
             -d "{\"component\":\"frontend\",\"tag\":\"sha-$(git rev-parse --short HEAD)\"}"
