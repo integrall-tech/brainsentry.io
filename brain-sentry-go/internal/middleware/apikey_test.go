@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/integraltech/brainsentry/internal/domain"
@@ -245,7 +246,16 @@ func TestAPIKey_JWTBearerIsNotClaimedAsAKey(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/memories", nil)
-	req.Header.Set("Authorization", "Bearer eyJhbGciOiJIUzI1NiJ9.fake.jwt")
+	// Assembled from parts, and not a realistic base64 payload: a literal
+	// "eyJhbGci..." fixture trips the CI secret scanner's generic bearer-token
+	// detector. The alternative — adding this file to the scanner's ignore
+	// list — would blind it to a real key pasted here while debugging auth,
+	// which is precisely the file where that is most likely to happen.
+	//
+	// The shape is all the code under test looks at anyway: it dispatches on
+	// the "bs_" prefix, so any non-prefixed credential exercises this path.
+	jwtLike := strings.Join([]string{"header", "payload", "signature"}, ".")
+	req.Header.Set("Authorization", "Bearer "+jwtLike)
 
 	APIKeyAuth(auth, nil)(h).ServeHTTP(rr, req)
 
