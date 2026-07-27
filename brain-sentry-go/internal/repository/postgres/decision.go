@@ -25,9 +25,17 @@ func NewDecisionRepository(pool *pgxpool.Pool) *DecisionRepository {
 	return &DecisionRepository{pool: pool}
 }
 
+// decisionColumns is the INSERT column list — bare names, no casts.
 const decisionColumns = `id, tenant_id, category, scenario, reasoning, outcome, confidence,
 	agent_id, session_id, parent_decision_id, entity_ids, memory_ids, policy_violations,
 	embedding, metadata, created_at, valid_from, valid_until, recorded_at, superseded_by`
+
+// decisionSelectColumns is the SELECT projection. It differs from
+// decisionColumns in one place: embedding is cast back to float4[], because
+// pgx cannot scan pgvector's text output into []float32. See vector.go.
+var decisionSelectColumns = `id, tenant_id, category, scenario, reasoning, outcome, confidence,
+	agent_id, session_id, parent_decision_id, entity_ids, memory_ids, policy_violations,
+	` + vectorSelect("embedding") + `, metadata, created_at, valid_from, valid_until, recorded_at, superseded_by`
 
 func scanDecision(row pgx.Row) (*domain.Decision, error) {
 	var d domain.Decision
@@ -90,13 +98,15 @@ func (r *DecisionRepository) Create(ctx context.Context, d *domain.Decision) err
 		superseded = &d.SupersededBy
 	}
 
+	// $14::vector — the embedding travels as a pgvector text literal; without
+	// the cast Postgres receives "{...}" and rejects it. See vector.go.
 	query := fmt.Sprintf(`INSERT INTO decisions (%s)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`, decisionColumns)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::vector,$15,$16,$17,$18,$19,$20)`, decisionColumns)
 
 	_, err := r.pool.Exec(ctx, query,
 		d.ID, d.TenantID, d.Category, d.Scenario, d.Reasoning, d.Outcome, d.Confidence,
 		d.AgentID, d.SessionID, parent, entityIDs, memoryIDs, violations,
-		d.Embedding, metadata, d.CreatedAt, d.ValidFrom, d.ValidUntil, d.RecordedAt, superseded,
+		vectorParam(d.Embedding), metadata, d.CreatedAt, d.ValidFrom, d.ValidUntil, d.RecordedAt, superseded,
 	)
 	if err != nil {
 		return fmt.Errorf("inserting decision: %w", err)
@@ -107,7 +117,7 @@ func (r *DecisionRepository) Create(ctx context.Context, d *domain.Decision) err
 // FindByID returns a single decision scoped to tenant.
 func (r *DecisionRepository) FindByID(ctx context.Context, id string) (*domain.Decision, error) {
 	tenantID := tenant.FromContext(ctx)
-	query := fmt.Sprintf(`SELECT %s FROM decisions WHERE id = $1 AND tenant_id = $2`, decisionColumns)
+	query := fmt.Sprintf(`SELECT %s FROM decisions WHERE id = $1 AND tenant_id = $2`, decisionSelectColumns)
 	d, err := scanDecision(r.pool.QueryRow(ctx, query, id, tenantID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -160,7 +170,7 @@ func (r *DecisionRepository) List(ctx context.Context, f DecisionFilter) ([]*dom
 		limit = 100
 	}
 	query := fmt.Sprintf(`SELECT %s FROM decisions WHERE %s ORDER BY created_at DESC LIMIT %d OFFSET %d`,
-		decisionColumns, where, limit, f.Offset)
+		decisionSelectColumns, where, limit, f.Offset)
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -182,7 +192,7 @@ func (r *DecisionRepository) List(ctx context.Context, f DecisionFilter) ([]*dom
 // Children returns decisions whose ParentDecisionID points at id.
 func (r *DecisionRepository) Children(ctx context.Context, id string) ([]*domain.Decision, error) {
 	tenantID := tenant.FromContext(ctx)
-	query := fmt.Sprintf(`SELECT %s FROM decisions WHERE tenant_id = $1 AND parent_decision_id = $2 ORDER BY created_at ASC`, decisionColumns)
+	query := fmt.Sprintf(`SELECT %s FROM decisions WHERE tenant_id = $1 AND parent_decision_id = $2 ORDER BY created_at ASC`, decisionSelectColumns)
 	rows, err := r.pool.Query(ctx, query, tenantID, id)
 	if err != nil {
 		return nil, err
@@ -211,7 +221,7 @@ func (r *DecisionRepository) FindPrecedents(ctx context.Context, category string
 	if len(embedding) == 0 {
 		query := fmt.Sprintf(`SELECT %s FROM decisions
 			WHERE tenant_id = $1 AND category = $2
-			ORDER BY created_at DESC LIMIT $3`, decisionColumns)
+			ORDER BY created_at DESC LIMIT $3`, decisionSelectColumns)
 		rows, err := r.pool.Query(ctx, query, tenantID, category, limit)
 		if err != nil {
 			return nil, err
@@ -232,9 +242,11 @@ func (r *DecisionRepository) FindPrecedents(ctx context.Context, category string
 		FROM decisions
 		WHERE tenant_id = $1 AND category = $2 AND embedding IS NOT NULL
 		ORDER BY embedding <=> $3::vector ASC
-		LIMIT $4`, decisionColumns)
+		LIMIT $4`, decisionSelectColumns)
 
-	rows, err := r.pool.Query(ctx, query, tenantID, category, embedding, limit)
+	// Same encoding rule as the INSERT: the $3::vector cast only works on a
+	// pgvector text literal, not on pgx's "{...}" array rendering.
+	rows, err := r.pool.Query(ctx, query, tenantID, category, vectorParam(embedding), limit)
 	if err != nil {
 		return nil, err
 	}

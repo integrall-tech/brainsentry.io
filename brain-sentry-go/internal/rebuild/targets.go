@@ -33,6 +33,17 @@ type GraphSink interface {
 	DropGraph(ctx context.Context) error
 }
 
+// VectorIndexEnsurer recreates the FalkorDB vector index. Optional: a sink
+// that doesn't implement it simply skips the step.
+//
+// This exists because DropGraph takes the index down with the graph, and the
+// index was otherwise only created at server boot. A rebuild therefore left
+// vector search broken until the next restart — silently, since
+// VectorSearch degrades to access-count ranking instead of erroring.
+type VectorIndexEnsurer interface {
+	EnsureVectorIndex(ctx context.Context, dimensions int) error
+}
+
 // EmbeddingNullifier truncates embeddings on every memory so the next
 // search re-embeds lazily. We intentionally do NOT eagerly re-embed in
 // this pass — an eager pass burns embedding tokens for memories that
@@ -58,13 +69,23 @@ type SummaryWiper interface {
 // GraphRebuilder returns a Rebuilder that drops the FalkorDB graph and
 // re-walks memories to re-insert nodes + edges. Pages through memories in
 // chunks of 200 to bound memory pressure for large tenants.
-func GraphRebuilder(lister MemoryLister, sink GraphSink) Rebuilder {
+//
+// embeddingDimensions drives the vector index recreated after the drop; pass
+// 0 to skip (sinks that don't implement VectorIndexEnsurer skip regardless).
+func GraphRebuilder(lister MemoryLister, sink GraphSink, embeddingDimensions int) Rebuilder {
 	return func(ctx context.Context) (int, error) {
 		if lister == nil || sink == nil {
 			return 0, errors.New("graph rebuilder: lister or sink missing")
 		}
 		if err := sink.DropGraph(ctx); err != nil {
 			return 0, fmt.Errorf("drop graph: %w", err)
+		}
+		// DropGraph took the vector index with it. Recreate it BEFORE the
+		// nodes go back in, so the index covers everything we insert.
+		if ensurer, ok := sink.(VectorIndexEnsurer); ok && embeddingDimensions > 0 {
+			if err := ensurer.EnsureVectorIndex(ctx, embeddingDimensions); err != nil {
+				return 0, fmt.Errorf("recreate vector index: %w", err)
+			}
 		}
 		page := 0
 		const pageSize = 200

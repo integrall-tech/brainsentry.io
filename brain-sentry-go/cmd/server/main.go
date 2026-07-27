@@ -734,7 +734,7 @@ func main() {
 	// report — see internal/rebuild/service.go for the contract.
 	rebuildSvc := rebuild.New()
 	if memoryGraphRepo != nil && memoryRepo != nil {
-		_ = rebuildSvc.Register("graph", rebuild.GraphRebuilder(memoryRepo, memoryGraphRepo))
+		_ = rebuildSvc.Register("graph", rebuild.GraphRebuilder(memoryRepo, memoryGraphRepo, cfg.Embedding.Dimensions))
 	}
 	_ = rebuildSvc.Register("embeddings", rebuild.EmbeddingsRebuilder(memoryRepo))
 	_ = rebuildSvc.Register("compress", rebuild.CompressRebuilder(memoryRepo))

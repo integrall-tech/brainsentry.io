@@ -74,3 +74,20 @@ jobs:
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,scope=frontend,mode=max
           provenance: false
+
+      # Ver a nota equivalente em build-backend-image.yml. O frontend é o
+      # último passo da ordem de release (backend → migrate → frontend), e o
+      # deploy-component.sh do lado da VPS respeita isso.
+      - name: Trigger VPS deploy
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+        run: |
+          if [ -z "$DEPLOY_TOKEN" ]; then
+            echo "DEPLOY_TOKEN não configurado — pulando o deploy automático."
+            exit 0
+          fi
+          curl -fsS --max-time 30 https://deploy.brainsentry.com.br/hooks/deploy \
+            -H "X-Deploy-Token: $DEPLOY_TOKEN" \
+            -H 'Content-Type: application/json' \
+            -d "{\"component\":\"frontend\",\"tag\":\"sha-$(git rev-parse --short HEAD)\"}"

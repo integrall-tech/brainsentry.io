@@ -37,12 +37,21 @@ func (r *GraphRAGRepository) ensureIndex(ctx context.Context) {
 
 // EnsureVectorIndex creates a vector index on Memory nodes if it doesn't exist.
 func (r *GraphRAGRepository) EnsureVectorIndex(ctx context.Context, dimensions int) error {
+	return ensureVectorIndex(ctx, r.client, dimensions)
+}
+
+// ensureVectorIndex holds the single definition of the Memory vector index.
+// It is shared because two owners need to create it: the server at boot, and
+// the rebuild after DropGraph wipes it (see internal/rebuild). Duplicating
+// the DDL is how the two drift apart — e.g. one gets the dimension bump and
+// the other doesn't, leaving queries failing on a stale index.
+func ensureVectorIndex(ctx context.Context, client *Client, dimensions int) error {
 	cypher := fmt.Sprintf(
 		`CREATE VECTOR INDEX FOR (m:Memory) ON (m.embedding) OPTIONS {dimension: %d, similarityFunction: 'cosine'}`,
 		dimensions,
 	)
 
-	_, err := r.client.Query(ctx, cypher)
+	_, err := client.Query(ctx, cypher)
 	if err != nil {
 		// Index might already exist — not fatal
 		if strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "ERR") {

@@ -33,12 +33,38 @@ type fakeGraphSink struct {
 	dropErr     error
 	saveErr     error
 	relsErr     error
+
+	// Vector index bookkeeping. indexedAfterSaves records how many memories
+	// were already written when the index was (re)created — the index must
+	// come first, so this has to be 0.
+	indexedDims       int
+	indexCalls        int
+	indexedAfterSaves int
+	indexErr          error
 }
 
 func (f *fakeGraphSink) DropGraph(_ context.Context) error {
 	f.dropped = true
 	return f.dropErr
 }
+
+func (f *fakeGraphSink) EnsureVectorIndex(_ context.Context, dimensions int) error {
+	f.indexCalls++
+	f.indexedDims = dimensions
+	f.indexedAfterSaves = len(f.saved)
+	return f.indexErr
+}
+
+// plainGraphSink implements GraphSink WITHOUT VectorIndexEnsurer, to pin the
+// optional-interface behaviour.
+type plainGraphSink struct{ saved []string }
+
+func (p *plainGraphSink) DropGraph(_ context.Context) error { return nil }
+func (p *plainGraphSink) SaveToGraph(_ context.Context, m *domain.Memory) error {
+	p.saved = append(p.saved, m.ID)
+	return nil
+}
+func (p *plainGraphSink) CreateAllRelationships(_ context.Context, _ string) error { return nil }
 
 func (f *fakeGraphSink) SaveToGraph(_ context.Context, m *domain.Memory) error {
 	if f.saveErr != nil {
@@ -98,7 +124,7 @@ func TestGraphRebuilder_DropsThenInsertsAllPagesThenEdgesPerTenant(t *testing.T)
 		},
 	}
 	sink := &fakeGraphSink{}
-	n, err := GraphRebuilder(lister, sink)(context.Background())
+	n, err := GraphRebuilder(lister, sink, 0)(context.Background())
 	if err != nil {
 		t.Fatalf("rebuild: %v", err)
 	}
@@ -121,14 +147,14 @@ func TestGraphRebuilder_DropsThenInsertsAllPagesThenEdgesPerTenant(t *testing.T)
 }
 
 func TestGraphRebuilder_NilArgsErrors(t *testing.T) {
-	if _, err := GraphRebuilder(nil, nil)(context.Background()); err == nil {
+	if _, err := GraphRebuilder(nil, nil, 0)(context.Background()); err == nil {
 		t.Errorf("expected error for nil deps")
 	}
 }
 
 func TestGraphRebuilder_DropFailureAborts(t *testing.T) {
 	sink := &fakeGraphSink{dropErr: errors.New("boom")}
-	_, err := GraphRebuilder(&fakeLister{}, sink)(context.Background())
+	_, err := GraphRebuilder(&fakeLister{}, sink, 0)(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "drop graph") {
 		t.Errorf("expected drop error; got %v", err)
 	}
@@ -137,7 +163,7 @@ func TestGraphRebuilder_DropFailureAborts(t *testing.T) {
 func TestGraphRebuilder_SaveFailureAbortsWithCount(t *testing.T) {
 	sink := &fakeGraphSink{saveErr: errors.New("falkor down")}
 	lister := &fakeLister{pages: [][]domain.Memory{{{ID: "m1", TenantID: "t1"}}}}
-	n, err := GraphRebuilder(lister, sink)(context.Background())
+	n, err := GraphRebuilder(lister, sink, 0)(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "save memory") {
 		t.Errorf("expected save error; got %v", err)
 	}
@@ -154,7 +180,7 @@ func TestGraphRebuilder_StopsAtPartialPage(t *testing.T) {
 	}
 	lister := &fakeLister{pages: [][]domain.Memory{short}}
 	sink := &fakeGraphSink{}
-	n, err := GraphRebuilder(lister, sink)(context.Background())
+	n, err := GraphRebuilder(lister, sink, 0)(context.Background())
 	if err != nil {
 		t.Fatalf("rebuild: %v", err)
 	}
@@ -223,5 +249,61 @@ func TestCompressRebuilder_ErrorPropagated(t *testing.T) {
 	_, err := CompressRebuilder(&fakeWiper{err: errors.New("pg lock")})(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "wipe context summaries") {
 		t.Errorf("expected wipe error; got %v", err)
+	}
+}
+
+// The bug: DropGraph removes the vector index along with the graph, and the
+// index was only ever created at server boot — so every rebuild left vector
+// search silently degraded until the next restart.
+func TestGraphRebuilder_RecreatesVectorIndexBeforeInserting(t *testing.T) {
+	lister := &fakeLister{pages: [][]domain.Memory{{{ID: "m1", TenantID: "t1"}}}}
+	sink := &fakeGraphSink{}
+
+	if _, err := GraphRebuilder(lister, sink, 1536)(context.Background()); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+	if sink.indexCalls != 1 {
+		t.Errorf("expected the index to be recreated once, got %d calls", sink.indexCalls)
+	}
+	if sink.indexedDims != 1536 {
+		t.Errorf("index created with %d dimensions, want 1536", sink.indexedDims)
+	}
+	// Ordering matters: an index built after the nodes would not cover them.
+	if sink.indexedAfterSaves != 0 {
+		t.Errorf("index was created after %d saves; it must come first", sink.indexedAfterSaves)
+	}
+}
+
+func TestGraphRebuilder_SkipsIndexWhenDimensionsUnset(t *testing.T) {
+	sink := &fakeGraphSink{}
+	if _, err := GraphRebuilder(&fakeLister{}, sink, 0)(context.Background()); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+	if sink.indexCalls != 0 {
+		t.Errorf("dimensions=0 must skip the index, got %d calls", sink.indexCalls)
+	}
+}
+
+// A sink that cannot manage indexes must still rebuild normally.
+func TestGraphRebuilder_SinkWithoutIndexSupportStillRebuilds(t *testing.T) {
+	lister := &fakeLister{pages: [][]domain.Memory{{{ID: "m1", TenantID: "t1"}}}}
+	sink := &plainGraphSink{}
+
+	n, err := GraphRebuilder(lister, sink, 1536)(context.Background())
+	if err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+	if n != 1 || len(sink.saved) != 1 {
+		t.Errorf("expected 1 memory rebuilt, got n=%d saved=%v", n, sink.saved)
+	}
+}
+
+// A failed index recreation must abort: continuing would repopulate the graph
+// with no index, which is exactly the silent-degradation state we're fixing.
+func TestGraphRebuilder_IndexFailureAborts(t *testing.T) {
+	sink := &fakeGraphSink{indexErr: errors.New("no index for you")}
+	_, err := GraphRebuilder(&fakeLister{}, sink, 1536)(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "recreate vector index") {
+		t.Errorf("expected index error; got %v", err)
 	}
 }

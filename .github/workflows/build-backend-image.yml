@@ -76,3 +76,27 @@ jobs:
           cache-from: type=gha,scope=backend
           cache-to: type=gha,scope=backend,mode=max
           provenance: false
+
+      # Dispara o deploy na VPS. O receiver (adnanh/webhook) roda em
+      # deploy.brainsentry.com.br e chama scripts/deploy-component.sh, que
+      # aplica a ordem obrigatória backend → migrate → frontend.
+      #
+      # Usa a tag sha-<short> porque é a única do metadata-action que aponta
+      # para ESTE build; `latest` é ambíguo quando dois merges se cruzam.
+      #
+      # Requer o secret DEPLOY_TOKEN no repositório (o mesmo valor de
+      # DEPLOY_TOKEN no .env da VPS). Sem ele o step é pulado, para não
+      # quebrar forks e PRs.
+      - name: Trigger VPS deploy
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+        run: |
+          if [ -z "$DEPLOY_TOKEN" ]; then
+            echo "DEPLOY_TOKEN não configurado — pulando o deploy automático."
+            exit 0
+          fi
+          curl -fsS --max-time 30 https://deploy.brainsentry.com.br/hooks/deploy \
+            -H "X-Deploy-Token: $DEPLOY_TOKEN" \
+            -H 'Content-Type: application/json' \
+            -d "{\"component\":\"backend\",\"tag\":\"sha-$(git rev-parse --short HEAD)\"}"
