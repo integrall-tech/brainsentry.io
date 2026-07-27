@@ -36,10 +36,10 @@ const apiKeyLookupPrefixLen = 12
 // middleware.TenantExtractor). That is the difference between "a bug writes
 // to the wrong customer" and "a bug cannot reach the wrong customer".
 type APIKey struct {
-	ID        string     `json:"id"`
-	TenantID  string     `json:"tenantId"`
-	Name      string     `json:"name"`
-	KeyPrefix string     `json:"keyPrefix"`
+	ID        string `json:"id"`
+	TenantID  string `json:"tenantId"`
+	Name      string `json:"name"`
+	KeyPrefix string `json:"keyPrefix"`
 	// KeyHash never leaves the repository layer; json:"-" so it cannot be
 	// serialised into a response by accident.
 	KeyHash    string     `json:"-"`
