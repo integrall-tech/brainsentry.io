@@ -1,5 +1,4 @@
 name: Build Frontend Image
-
 # Trigger on frontend changes to main, on version tags, and on demand.
 # Pull requests build but do NOT push.
 on:
@@ -14,14 +13,11 @@ on:
       - 'brain-sentry-frontend/**'
       - '.github/workflows/build-frontend-image.yml'
   workflow_dispatch:
-
 permissions:
   contents: read
   packages: write
-
 env:
   IMAGE: ghcr.io/integrall-tech/brainsentry-frontend
-
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
@@ -29,10 +25,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
-
       - name: Login to GHCR
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -40,7 +34,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Extract metadata (tags + labels)
         id: meta
         uses: docker/metadata-action@v5
@@ -52,7 +45,6 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=ref,event=branch
-
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -74,25 +66,3 @@ jobs:
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,scope=frontend,mode=max
           provenance: false
-
-      # Ver a nota equivalente em build-backend-image.yml. O frontend é o
-      # último passo da ordem de release (backend → migrate → frontend), e o
-      # deploy-component.sh do lado da VPS respeita isso.
-      - name: Trigger VPS deploy
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        env:
-          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
-        run: |
-          if [ -z "$DEPLOY_TOKEN" ]; then
-            echo "DEPLOY_TOKEN não configurado — pulando o deploy automático."
-            exit 0
-          fi
-          # Mesmo retry do build-backend-image.yml: a chamada ao webhook falhou
-          # por timeout de rede na primeira execucao real, com a imagem ja
-          # publicada. Ver a nota la para o racional.
-          curl -fsS --retry 4 --retry-delay 15 --retry-all-errors \
-            --connect-timeout 10 --max-time 30 \
-            https://deploy.brainsentry.com.br/hooks/deploy \
-            -H "X-Deploy-Token: $DEPLOY_TOKEN" \
-            -H 'Content-Type: application/json' \
-            -d "{\"component\":\"frontend\",\"tag\":\"sha-$(git rev-parse --short HEAD)\"}"
