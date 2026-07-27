@@ -32,6 +32,14 @@ func JWTAuth(jwtService *service.JWTService, publicPaths []string) func(http.Han
 				}
 			}
 
+			// Already authenticated by a service API key (APIKeyAuth runs
+			// first). Without this the request would be rejected here for
+			// carrying no JWT — the key IS the credential.
+			if ServicePrincipalFromContext(r.Context()) != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			// Extract Bearer token
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {

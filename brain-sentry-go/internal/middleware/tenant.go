@@ -19,12 +19,49 @@ import (
 //
 // Unauthenticated requests only reach this middleware on public paths
 // (JWTAuth runs first); for those, header > query > default applies.
+//
+// Service API keys are the exception to all of the above: they are pinned to
+// the tenant stored with the key and NOTHING a caller sends can move them —
+// not the header, not the query, not an admin role. See below.
 func TenantExtractor(defaultTenantID string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			requested := r.Header.Get("X-Tenant-ID")
 			if requested == "" {
 				requested = r.URL.Query().Get("tenant")
+			}
+
+			// A service key is scoped to exactly one tenant, by construction
+			// (RFC-014 §8.1). The user path lets an ADMIN act on another
+			// tenant via the header; a service key must NOT inherit that,
+			// because "a bug writes to the wrong customer" is the worst
+			// defect this integration can have.
+			//
+			// A divergent header is refused rather than ignored: silently
+			// serving tenant A to a caller who asked for B is how a wrong
+			// assumption survives to production unnoticed.
+			if principal := ServicePrincipalFromContext(r.Context()); principal != nil {
+				if requested != "" && requested != principal.TenantID {
+					writeTenantError(w, http.StatusForbidden,
+						"forbidden: api key is scoped to a single tenant")
+					return
+				}
+				// No default fallback here either: the key always carries its
+				// tenant, so an empty one means something is broken and must
+				// fail closed instead of landing on the default tenant
+				// (pkg/tenant.FromContext returns it, which is fail-open).
+				if principal.TenantID == "" {
+					writeTenantError(w, http.StatusForbidden,
+						"forbidden: api key has no tenant")
+					return
+				}
+				if err := tenant.ValidateTenantID(principal.TenantID); err != nil {
+					writeTenantError(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				ctx := tenant.WithTenant(r.Context(), principal.TenantID)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
 			}
 
 			var tenantID string

@@ -125,6 +125,7 @@ func main() {
 	// Repositories
 	userRepo := postgres.NewUserRepository(pool)
 	tenantRepo := postgres.NewTenantRepository(pool)
+	apiKeyRepo := postgres.NewAPIKeyRepository(pool)
 	memoryRepo := postgres.NewMemoryRepository(pool)
 	auditRepo := postgres.NewAuditRepository(pool)
 	versionRepo := postgres.NewVersionRepository(pool)
@@ -565,6 +566,8 @@ func main() {
 	authHandler := handler.NewAuthHandler(authService)
 	userHandler := handler.NewUserHandler(userRepo, authService, cfg.Security.BcryptCost)
 	tenantHandler := handler.NewTenantHandler(tenantRepo)
+	apiKeyService := service.NewAPIKeyService(apiKeyRepo)
+	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
 	memoryHandler := handler.NewMemoryHandler(memoryService, relationshipService)
 	auditHandler := handler.NewAuditHandler(auditService)
 	statsHandler := handler.NewStatsHandler(memoryRepo, auditRepo)
@@ -840,6 +843,11 @@ func main() {
 		"/metrics",
 		"/swagger.json",
 	}
+	// Order matters. APIKeyAuth runs first and only claims requests carrying
+	// a "bs_"-prefixed credential; everything else falls through untouched,
+	// so JWT behaviour is unchanged. TenantExtractor then sees whether the
+	// request is a service principal and pins the tenant accordingly.
+	r.Use(middleware.APIKeyAuth(apiKeyService, publicPaths))
 	r.Use(middleware.JWTAuth(jwtService, publicPaths))
 	r.Use(middleware.TenantExtractor(cfg.Tenant.DefaultID))
 
@@ -916,6 +924,20 @@ func main() {
 			r.With(middleware.RequireRole(middleware.RoleAdmin)).Post("/", tenantHandler.Create)
 			r.With(middleware.RequireRole(middleware.RoleAdmin)).Put("/{id}", tenantHandler.Update)
 			r.With(middleware.RequireRole(middleware.RoleAdmin)).Delete("/{id}", tenantHandler.Delete)
+
+			// Service API keys (RFC-014 fatia 0). Admin JWT only, and
+			// RejectServicePrincipal keeps service keys out: a key that can
+			// mint keys could mint one for another tenant, handing back the
+			// cross-tenant reach this credential exists to remove.
+			r.With(middleware.RejectServicePrincipal, middleware.RequireRole(middleware.RoleAdmin)).
+				Post("/{id}/api-keys", apiKeyHandler.Create)
+			r.With(middleware.RejectServicePrincipal, middleware.RequireRole(middleware.RoleAdmin)).
+				Get("/{id}/api-keys", apiKeyHandler.List)
+		})
+
+		r.Route("/v1/api-keys", func(r chi.Router) {
+			r.With(middleware.RejectServicePrincipal, middleware.RequireRole(middleware.RoleAdmin)).
+				Delete("/{keyId}", apiKeyHandler.Revoke)
 		})
 
 		// Memories
