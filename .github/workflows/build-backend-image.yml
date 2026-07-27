@@ -96,7 +96,14 @@ jobs:
             echo "DEPLOY_TOKEN não configurado — pulando o deploy automático."
             exit 0
           fi
-          curl -fsS --max-time 30 https://deploy.brainsentry.com.br/hooks/deploy \
+          # Retry porque a primeira execucao real deu "curl: (28) Connection
+          # timed out" e marcou o build como falho com a imagem ja publicada.
+          # O job irmao (frontend) chamou o mesmo endpoint no mesmo minuto e
+          # passou, entao e rede intermitente entre runner e VPS. Se as 4
+          # tentativas falharem, ai a falha e legitima: o deploy nao ocorreu.
+          curl -fsS --retry 4 --retry-delay 15 --retry-all-errors \
+            --connect-timeout 10 --max-time 30 \
+            https://deploy.brainsentry.com.br/hooks/deploy \
             -H "X-Deploy-Token: $DEPLOY_TOKEN" \
             -H 'Content-Type: application/json' \
             -d "{\"component\":\"backend\",\"tag\":\"sha-$(git rev-parse --short HEAD)\"}"
