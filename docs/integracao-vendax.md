@@ -110,7 +110,7 @@ Campos que importam para esta integração:
 | `validTo` | prazo **por tipo de fato** (RFC §9.1), não um TTL global. Ver tabela abaixo |
 | `metadata` | pares chave/valor filtráveis na busca exata |
 | `category` | `DECISION`, `KNOWLEDGE`, `PATTERN`, `CONTEXT`, `INSIGHT`, `WARNING`, `ACTION`, `REFERENCE`, `ANTIPATTERN`, `DOMAIN`, `BUG` |
-| `importance` | `CRITICAL`, `IMPORTANT`, `MINOR` — **só estes três**. O campo não é validado, então um valor fora da lista é aceito e depois não casa com nenhum filtro |
+| `importance` | `CRITICAL`, `IMPORTANT`, `MINOR` — **só estes três**. Valor fora da lista agora devolve **400** (antes era aceito e o dado ficava invisível) |
 | `provenance` | `EXPLICIT` (decisão registrada pelo vendedor), `OBSERVED` (derivado de conversa), `INFERRED` (sentimento), `VALIDATED`, `CORRECTED`, `IMPORTED`. É o maior peso do trust score |
 
 Prazos por tipo, conforme a RFC:
@@ -127,6 +127,40 @@ Resposta `201` com o objeto criado (`id`, `tenantId`, `createdAt`, …).
 
 > **Sempre pelo outbox.** Gravar memória não pode derrubar uma cotação. O
 > Brain Sentry não sabe nada sobre isso — a garantia é do Core (RFC §5.1).
+
+### 2.1 Idempotência e deduplicação — leia antes de escrever em lote
+
+Duas regras governam o que acontece quando o mesmo `POST` chega duas vezes, e
+elas foram desenhadas para o padrão de escrita do VendaX (um template por
+cliente, texto frequentemente idêntico entre clientes):
+
+**`sourceReference` é a chave de idempotência.** Duas chamadas com o mesmo
+`sourceReference` produzem **uma** memória e devolvem **o mesmo id** — a
+segunda é no-op. É o que torna a retentativa do outbox segura: o outbox é
+*at-least-once* por construção, e a retentativa não cria fato duplicado.
+
+Há índice único parcial `(tenant_id, source_reference)` no banco, então a
+garantia não depende só do código.
+
+**A deduplicação por conteúdo é escopada pelas tags da requisição.** Duas
+memórias só são consideradas duplicatas se o texto for quase idêntico **e** a
+segunda declarar todas as tags da primeira. Consequências:
+
+| Situação | Resultado |
+| --- | --- |
+| mesmo texto, `cliente:acme-001` vs `cliente:beta-002` | **duas** memórias — cada cliente tem a sua |
+| mesmo texto, mesmo cliente, sem `sourceReference` | **uma** memória (deduplicou) |
+| mesmo texto, `sourceReference` diferente | **duas** memórias — origens distintas são fatos distintos |
+| mesmo `sourceReference` repetido | **uma** memória, mesmo id |
+
+> Antes desta correção o dedup comparava contra o tenant inteiro: o segundo
+> cliente com o mesmo texto **não gerava fato nenhum** e a API devolvia `200`
+> com o id de uma memória do **outro** cliente. O Core acreditava ter gravado.
+> Se você viu esse comportamento em testes, era isso.
+
+**Implicação prática para a Fatia B:** mande sempre `cliente:{ref}` **e**
+`sourceReference`. Com os dois, escrita repetida é segura e fatos de clientes
+diferentes nunca se suprimem.
 
 ---
 
