@@ -125,6 +125,8 @@ func main() {
 	// Repositories
 	userRepo := postgres.NewUserRepository(pool)
 	tenantRepo := postgres.NewTenantRepository(pool)
+	apiKeyRepo := postgres.NewAPIKeyRepository(pool)
+	receiptRepo := postgres.NewReceiptRepository(pool)
 	memoryRepo := postgres.NewMemoryRepository(pool)
 	auditRepo := postgres.NewAuditRepository(pool)
 	versionRepo := postgres.NewVersionRepository(pool)
@@ -565,6 +567,12 @@ func main() {
 	authHandler := handler.NewAuthHandler(authService)
 	userHandler := handler.NewUserHandler(userRepo, authService, cfg.Security.BcryptCost)
 	tenantHandler := handler.NewTenantHandler(tenantRepo)
+	apiKeyService := service.NewAPIKeyService(apiKeyRepo)
+	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
+	// Retention + data-subject erasure (RFC-014 §10). memoryGraphRepo may be
+	// nil when FalkorDB is down; the service reports that instead of failing.
+	retentionService := service.NewRetentionService(memoryRepo, memoryGraphRepo, tenantRepo, receiptRepo)
+	retentionHandler := handler.NewRetentionHandler(retentionService, receiptRepo)
 	memoryHandler := handler.NewMemoryHandler(memoryService, relationshipService)
 	auditHandler := handler.NewAuditHandler(auditService)
 	statsHandler := handler.NewStatsHandler(memoryRepo, auditRepo)
@@ -840,6 +848,11 @@ func main() {
 		"/metrics",
 		"/swagger.json",
 	}
+	// Order matters. APIKeyAuth runs first and only claims requests carrying
+	// a "bs_"-prefixed credential; everything else falls through untouched,
+	// so JWT behaviour is unchanged. TenantExtractor then sees whether the
+	// request is a service principal and pins the tenant accordingly.
+	r.Use(middleware.APIKeyAuth(apiKeyService, publicPaths))
 	r.Use(middleware.JWTAuth(jwtService, publicPaths))
 	r.Use(middleware.TenantExtractor(cfg.Tenant.DefaultID))
 
@@ -916,6 +929,30 @@ func main() {
 			r.With(middleware.RequireRole(middleware.RoleAdmin)).Post("/", tenantHandler.Create)
 			r.With(middleware.RequireRole(middleware.RoleAdmin)).Put("/{id}", tenantHandler.Update)
 			r.With(middleware.RequireRole(middleware.RoleAdmin)).Delete("/{id}", tenantHandler.Delete)
+
+			// Service API keys (RFC-014 fatia 0). Admin JWT only, and
+			// RejectServicePrincipal keeps service keys out: a key that can
+			// mint keys could mint one for another tenant, handing back the
+			// cross-tenant reach this credential exists to remove.
+			r.With(middleware.RejectServicePrincipal, middleware.RequireRole(middleware.RoleAdmin)).
+				Post("/{id}/api-keys", apiKeyHandler.Create)
+			r.With(middleware.RejectServicePrincipal, middleware.RequireRole(middleware.RoleAdmin)).
+				Get("/{id}/api-keys", apiKeyHandler.List)
+		})
+
+		// Retention + data-subject erasure (RFC-014 §10). Reachable by the
+		// tenant's service key: the Core receives the customer's removal
+		// request, and the key is pinned to one tenant, so it can only erase
+		// its own data. Destructive only with "confirm": true in the body.
+		r.Route("/v1/privacy", func(r chi.Router) {
+			r.Post("/erasure", retentionHandler.Erase)
+			r.Get("/receipts", retentionHandler.ListReceipts)
+		})
+		r.Post("/v1/retention/run", retentionHandler.RunRetention)
+
+		r.Route("/v1/api-keys", func(r chi.Router) {
+			r.With(middleware.RejectServicePrincipal, middleware.RequireRole(middleware.RoleAdmin)).
+				Delete("/{keyId}", apiKeyHandler.Revoke)
 		})
 
 		// Memories
@@ -924,6 +961,8 @@ func main() {
 			r.Post("/upload", memoryHandler.Upload)
 			r.Get("/", memoryHandler.List)
 			r.Post("/search", memoryHandler.Search)
+			// Bulk revocation for the audit routine (RFC-014 fatia 1).
+			r.Post("/batch-expire", memoryHandler.BatchExpire)
 			r.Get("/by-category/{category}", memoryHandler.GetByCategory)
 			r.Get("/by-importance/{importance}", memoryHandler.GetByImportance)
 			r.Get("/{id}", memoryHandler.GetByID)

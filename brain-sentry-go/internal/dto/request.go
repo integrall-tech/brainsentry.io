@@ -69,6 +69,33 @@ type SearchRequest struct {
 	Limit          int                     `json:"limit,omitempty"`
 	IncludeRelated bool                    `json:"includeRelated,omitempty"`
 	TenantID       string                  `json:"tenantId,omitempty"`
+
+	// SourceReference and Metadata switch the search to a DETERMINISTIC
+	// route: exact match, ordered by created_at desc, with no embedding, no
+	// query expansion and no similarity ranking (RFC-014 fatia 1).
+	//
+	// They exist because the audit asks "give me the fact produced by event
+	// X" — a lookup by identity. Answering that with semantic search would
+	// cost an embedding call and could return a *different* memory that
+	// happens to sit nearby in vector space.
+	//
+	// When either is set, Query becomes optional.
+	SourceReference string            `json:"sourceReference,omitempty"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
+}
+
+// IsExact reports whether this request must take the deterministic route.
+func (r SearchRequest) IsExact() bool {
+	return r.SourceReference != "" || len(r.Metadata) > 0
+}
+
+// BatchExpireRequest closes the validity window of many memories at once.
+// Either Ids or SourceReference must be given; Reason is recorded on each
+// memory so a revocation explains itself.
+type BatchExpireRequest struct {
+	Ids             []string `json:"ids,omitempty"`
+	SourceReference string   `json:"sourceReference,omitempty"`
+	Reason          string   `json:"reason"`
 }
 
 // InterceptRequest is the main entry point for context injection.

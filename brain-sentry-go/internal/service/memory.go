@@ -106,6 +106,8 @@ type memoryRepository interface {
 	FindSimHashes(ctx context.Context) (map[string]string, error)
 	BoostAccessCount(ctx context.Context, id string, boost int) error
 	SupersedeMemory(ctx context.Context, oldID, newID string) error
+	FindByExactFilter(ctx context.Context, f postgres.ExactFilter) ([]domain.Memory, error)
+	BatchExpire(ctx context.Context, ids []string, sourceReference, reason string) (*postgres.BatchExpireResult, error)
 }
 
 type memoryGraphRepository interface {
@@ -591,6 +593,14 @@ func (s *MemoryService) SearchMemories(ctx context.Context, req dto.SearchReques
 		limit = 10
 	}
 
+	// Deterministic route (RFC-014 fatia 1). Taken FIRST, before query
+	// expansion, embedding or scoring — those are not merely wasted here,
+	// they are wrong: an exact lookup that ranks by similarity can return a
+	// different memory than the one asked for.
+	if req.IsExact() {
+		return s.searchExact(ctx, req, limit, start)
+	}
+
 	// Query expansion: generate reformulations to broaden recall.
 	// Primary query is always first; reformulations augment (deduplicated).
 	expandedQueries := []string{req.Query}
@@ -799,4 +809,52 @@ func extractChainOfThought(content string) (string, string) {
 	cleaned = strings.TrimSpace(cleaned)
 
 	return cleaned, strings.Join(thoughts, "\n---\n")
+}
+
+// searchExact answers a lookup by identity: source reference and/or metadata
+// pairs, newest first.
+//
+// Deliberately does NOT touch the embedding service, the query expander or
+// the hybrid scorer. Beyond the wasted latency and embedding spend, ranking a
+// known key by similarity can put a *different* memory first — the audit
+// would then compare the wrong fact against the source and revoke the wrong
+// row.
+//
+// It also does not increment access counts: an audit sweep reading every fact
+// would otherwise inflate the very signal that access-based ranking uses.
+func (s *MemoryService) searchExact(ctx context.Context, req dto.SearchRequest, limit int, start time.Time) (*dto.SearchResponse, error) {
+	memories, err := s.memoryRepo.FindByExactFilter(ctx, postgres.ExactFilter{
+		SourceReference: req.SourceReference,
+		Metadata:        req.Metadata,
+		Limit:           limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]dto.MemoryResponse, 0, len(memories))
+	for _, m := range memories {
+		results = append(results, memoryToResponse(m))
+	}
+
+	return &dto.SearchResponse{
+		Results:      results,
+		Total:        len(results),
+		SearchTimeMs: time.Since(start).Milliseconds(),
+	}, nil
+}
+
+// BatchExpireMemories closes the validity window of many memories in one
+// transaction (RFC-014 fatia 1). Used by the audit routine, which revokes in
+// bulk when a source event is reverted.
+func (s *MemoryService) BatchExpireMemories(ctx context.Context, req dto.BatchExpireRequest) (*postgres.BatchExpireResult, error) {
+	if len(req.Ids) == 0 && req.SourceReference == "" {
+		return nil, fmt.Errorf("ids or sourceReference is required")
+	}
+	if req.Reason == "" {
+		// A bulk revocation with no reason is unauditable later — which
+		// defeats the point of a routine whose output is a report.
+		return nil, fmt.Errorf("reason is required")
+	}
+	return s.memoryRepo.BatchExpire(ctx, req.Ids, req.SourceReference, req.Reason)
 }

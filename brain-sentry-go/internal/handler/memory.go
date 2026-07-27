@@ -233,8 +233,12 @@ func (h *MemoryHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Query == "" {
-		writeError(w, http.StatusBadRequest, "query is required")
+	// A query is required only for the semantic route. An exact lookup
+	// (sourceReference / metadata) identifies its target without one —
+	// demanding a query there would force callers to invent text that is then
+	// deliberately ignored (RFC-014 fatia 1).
+	if req.Query == "" && !req.IsExact() {
+		writeError(w, http.StatusBadRequest, "query is required unless sourceReference or metadata is given")
 		return
 	}
 
@@ -332,4 +336,32 @@ func (h *MemoryHandler) Trust(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, m.TrustScore(time.Now()))
+}
+
+// BatchExpire handles POST /v1/memories/batch-expire
+//
+//	@Summary		Expire many memories in one transaction
+//	@Description	Closes the validity window (valid_to = now) of every matching memory and records the reason. Used by the audit routine, which revokes in bulk when a source event is reverted. Not a delete: /v1/memories/as-of still answers correctly about the past.
+//	@Tags			Memories
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		dto.BatchExpireRequest	true	"ids or sourceReference, plus a reason"
+//	@Success		200		{object}	postgres.BatchExpireResult
+//	@Failure		400		{object}	dto.ErrorResponse
+//	@Security		BearerAuth
+//	@Router			/v1/memories/batch-expire [post]
+func (h *MemoryHandler) BatchExpire(w http.ResponseWriter, r *http.Request) {
+	var req dto.BatchExpireRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	result, err := h.memoryService.BatchExpireMemories(r.Context(), req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
