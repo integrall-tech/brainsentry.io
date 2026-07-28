@@ -58,6 +58,27 @@ func (h *MemoryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enum validation is explicit here because nothing else does it: the
+	// `validate:"..."` struct tags in dto are decorative — no validator
+	// library is wired in this project. An unknown value used to be accepted,
+	// stored, and then match no filter, so the fact existed and was invisible.
+	// One 400 turns data that disappears into an error at the call site.
+	if req.Importance != "" && !req.Importance.Valid() {
+		writeError(w, http.StatusBadRequest,
+			"importance must be one of CRITICAL, IMPORTANT, MINOR")
+		return
+	}
+	if req.Category != "" && !req.Category.Valid() {
+		writeError(w, http.StatusBadRequest,
+			"category is not a known value (see /swagger.json)")
+		return
+	}
+	if req.Provenance != "" && !req.Provenance.Valid() {
+		writeError(w, http.StatusBadRequest,
+			"provenance must be one of EXPLICIT, VALIDATED, CORRECTED, OBSERVED, IMPORTED, INFERRED")
+		return
+	}
+
 	m, err := h.memoryService.CreateMemory(r.Context(), req)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create memory")

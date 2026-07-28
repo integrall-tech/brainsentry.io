@@ -104,6 +104,8 @@ type memoryRepository interface {
 	IncrementAccessCount(ctx context.Context, id string) error
 	RecordFeedback(ctx context.Context, id string, helpful bool) error
 	FindSimHashes(ctx context.Context) (map[string]string, error)
+	FindDedupCandidates(ctx context.Context, f postgres.DedupCandidateFilter) (map[string]string, error)
+	FindBySourceReference(ctx context.Context, sourceReference string) (*domain.Memory, error)
 	BoostAccessCount(ctx context.Context, id string, boost int) error
 	SupersedeMemory(ctx context.Context, oldID, newID string) error
 	FindByExactFilter(ctx context.Context, f postgres.ExactFilter) ([]domain.Memory, error)
@@ -151,6 +153,29 @@ func NewMemoryService(
 
 // CreateMemory creates a new memory with auto-analysis and embedding generation.
 func (s *MemoryService) CreateMemory(ctx context.Context, req dto.CreateMemoryRequest) (*domain.Memory, error) {
+	// 0. Idempotency by origin. The Core's outbox is at-least-once: it retries
+	// when it cannot be sure the previous call landed. One domain event must
+	// produce one memory, so the retry returns the SAME id instead of a second
+	// fact.
+	//
+	// Runs first, before stripping/compression/embedding, because a retry
+	// should cost a single indexed lookup — not another LLM round-trip for a
+	// memory that already exists.
+	//
+	// Until now the retry was absorbed by the content dedup, which this change
+	// correctly restricts to a tag scope; without this guard, restricting the
+	// dedup would have turned every outbox retry into a duplicate fact.
+	if req.SourceReference != "" {
+		if existing, err := s.memoryRepo.FindBySourceReference(ctx, req.SourceReference); err == nil && existing != nil {
+			slog.Info("memory already exists for this origin, returning it",
+				"sourceReference", req.SourceReference, "memoryId", existing.ID)
+			return existing, nil
+		} else if err != nil {
+			// A lookup failure must not silently become "create a duplicate".
+			return nil, fmt.Errorf("checking existing memory for source reference: %w", err)
+		}
+	}
+
 	// 1. Privacy stripping — strip secrets/PII before anything else touches the content.
 	if s.stripper != nil {
 		req.Content = s.stripper.StripBeforeStorage(req.Content)
@@ -213,8 +238,33 @@ func (s *MemoryService) CreateMemory(ctx context.Context, req dto.CreateMemoryRe
 	// Compute SimHash for deduplication
 	m.SimHash = SimHashToHex(ComputeSimHash(m.Content))
 
-	// Check for near-duplicates via SimHash
-	if existingHashes, err := s.memoryRepo.FindSimHashes(ctx); err == nil && len(existingHashes) > 0 {
+	// Near-duplicate check, now SCOPED. Two guards, in order:
+	//
+	// 1. A memory with a sourceReference comes from a distinct domain event,
+	//    so it is a distinct fact by construction — textual similarity gets no
+	//    vote. Idempotency for that case is handled above, by origin.
+	//
+	// 2. Otherwise, compare only against memories sharing the tags the caller
+	//    declared. The old code compared against the whole tenant, and the
+	//    VendaX write pattern (one templated sentence per customer) makes
+	//    byte-identical content across customers routine: the second POST fell
+	//    at distance 0, created nothing, and returned a memory tagged for a
+	//    DIFFERENT customer. The Core believed it had written; the customer
+	//    never got the fact; nothing recorded the suppression.
+	//
+	// req.Tags, not m.Tags: the compressor appends LLM-derived tags just above,
+	// and those are not deterministic — scoping on them would make the same
+	// fact fail to deduplicate against itself.
+	existingHashes := map[string]string{}
+	if m.SourceReference == "" {
+		if found, err := s.memoryRepo.FindDedupCandidates(ctx, postgres.DedupCandidateFilter{
+			SimHash:   m.SimHash,
+			ScopeTags: req.Tags,
+		}); err == nil {
+			existingHashes = found
+		}
+	}
+	if len(existingHashes) > 0 {
 		newHash := SimHashFromHex(m.SimHash)
 		for existingID, existingHex := range existingHashes {
 			existingHash := SimHashFromHex(existingHex)
