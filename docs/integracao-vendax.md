@@ -89,7 +89,7 @@ POST /v1/memories
 
 ```json
 {
-  "content": "recusou SKU-9182: não trabalha com a marca",
+  "content": "recusou Muçarela Fatiada 500g: não trabalha com a marca",
   "category": "DECISION",
   "importance": "IMPORTANT",
   "tags": ["cliente:acme-001", "tipo:recusa", "vendedor:v-77"],
@@ -99,6 +99,21 @@ POST /v1/memories
   "provenance": "EXPLICIT"
 }
 ```
+
+> **Nome do produto no `content`, código no `metadata` — os dois, sempre.**
+>
+> O `content` é o que vai para o **prompt do agente** e para os olhos do
+> vendedor; ali `"SKU-9182"` é ruído, porque nem o modelo nem a pessoa sabem o
+> que é. O `metadata` é o que a **auditoria** consulta, e ali o código é o
+> identificador estável — imune a renomeação de produto no ERP.
+>
+> Gravar só o nome quebra a reconferência quando o produto é renomeado.
+> Gravar só o código injeta no prompt um fato que ninguém entende. Gravar os
+> dois não tem contrapartida além de alguns bytes.
+>
+> Isto precisa valer **desde o primeiro fato**: a rotina de auditoria (fatia D)
+> valida validade, não reescreve texto — cada fato gravado na forma antiga
+> carrega essa forma para sempre.
 
 Campos que importam para esta integração:
 
