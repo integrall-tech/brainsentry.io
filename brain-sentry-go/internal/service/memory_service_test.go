@@ -298,9 +298,10 @@ func TestMemoryToResponse_IncludesComputedFields(t *testing.T) {
 }
 
 type fakeMemoryRepository struct {
-	byID            map[string]*domain.Memory
-	fullTextResults []domain.Memory
-	fullTextQueries []string
+	byID              map[string]*domain.Memory
+	fullTextResults   []domain.Memory
+	fullTextQueries   []string
+	fullTextTagScopes [][]string
 
 	exactCalls   []postgres.ExactFilter
 	exactResults []domain.Memory
@@ -410,12 +411,40 @@ func (f *fakeMemoryRepository) FindByImportance(_ context.Context, _ domain.Impo
 	return nil, nil
 }
 
-func (f *fakeMemoryRepository) FullTextSearch(_ context.Context, query string, limit int) ([]domain.Memory, error) {
+func (f *fakeMemoryRepository) FullTextSearch(ctx context.Context, query string, limit int) ([]domain.Memory, error) {
+	return f.FullTextSearchScoped(ctx, query, limit, nil)
+}
+
+// FullTextSearchScoped mimics the real query: the tag restriction is applied
+// BEFORE the limit, because that ordering is the property under test. Applying
+// it after would silently return fewer rows than exist — trading a leak for
+// "this customer has no such fact", which is worse for looking like an answer.
+func (f *fakeMemoryRepository) FullTextSearchScoped(_ context.Context, query string, limit int, tags []string) ([]domain.Memory, error) {
 	f.fullTextQueries = append(f.fullTextQueries, query)
-	if limit > 0 && len(f.fullTextResults) > limit {
-		return f.fullTextResults[:limit], nil
+	f.fullTextTagScopes = append(f.fullTextTagScopes, tags)
+
+	scoped := make([]domain.Memory, 0, len(f.fullTextResults))
+	for _, m := range f.fullTextResults {
+		if hasAllTags(m.Tags, tags) {
+			scoped = append(scoped, m)
+		}
 	}
-	return f.fullTextResults, nil
+	if limit > 0 && len(scoped) > limit {
+		return scoped[:limit], nil
+	}
+	return scoped, nil
+}
+
+func (f *fakeMemoryRepository) FindByIDsScoped(_ context.Context, ids []string, tags []string) ([]domain.Memory, error) {
+	var out []domain.Memory
+	for _, id := range ids {
+		m, ok := f.byID[id]
+		if !ok || !hasAllTags(m.Tags, tags) {
+			continue
+		}
+		out = append(out, *m)
+	}
+	return out, nil
 }
 
 func (f *fakeMemoryRepository) IncrementAccessCount(_ context.Context, _ string) error {
@@ -490,7 +519,13 @@ func TestSearchMemories_TextFallbackFiltersInactiveAndSorts(t *testing.T) {
 				Content:    "postgres memory",
 				Category:   domain.CategoryKnowledge,
 				Importance: domain.ImportanceMinor,
-				Tags:       []string{"other"},
+				// Era []string{"other"}. Este teste é sobre filtrar inativas e
+				// ordenar, mas pedia Tags:["core"] e esperava de volta esta
+				// memória marcada "other" — ou seja, afirmava o defeito que a
+				// busca tinha: tag como peso, não como recorte. Com o filtro
+				// correto ela não entraria no conjunto, e o teste perderia o
+				// segundo resultado de que precisa para exercitar a ordenação.
+				Tags:       []string{"core"},
 				MemoryType: domain.MemoryTypeSemantic,
 				CreatedAt:  now,
 				UpdatedAt:  now,
@@ -931,5 +966,123 @@ func TestCreateMemory_SameSourceReferenceIsIdempotent(t *testing.T) {
 	}
 	if len(repo.byID) != 1 {
 		t.Errorf("esperava 1 memoria apos a retentativa, tem %d", len(repo.byID))
+	}
+}
+
+// --- Escopo por tag na BUSCA (vazamento entre clientes) ---
+
+// O pior defeito possível segundo a RFC-014 §6.1: um recall que atravessa
+// clientes entrega informação de um na conversa de outro. Observado em
+// produção — `tags` entrava só no cálculo de pontuação, então a memória do
+// outro cliente vinha junto, apenas ranqueada abaixo.
+//
+// A consulta usada aqui CASA com o conteúdo de propósito. Com consulta
+// genérica o resultado seria 0 e a asserção "não veio o B" ficaria verde sem
+// nada ter sido filtrado — um teste que passa por acidente. Por isso o teste
+// afirma primeiro que o resultado NÃO é vazio.
+func TestSearchMemories_TagIsFilterNotJustScore(t *testing.T) {
+	const fato = "nao trabalha com a marca do produto"
+	repo := &fakeMemoryRepository{
+		fullTextResults: []domain.Memory{
+			{ID: "a", Content: fato, Tags: []string{"cliente:vendax-a", "tipo:recusa"}},
+			{ID: "b", Content: fato, Tags: []string{"cliente:vendax-b", "tipo:recusa"}},
+		},
+	}
+	svc := &MemoryService{memoryRepo: repo}
+
+	resp, err := svc.SearchMemories(context.Background(), dto.SearchRequest{
+		Query: "nao trabalha com a marca",
+		Tags:  []string{"cliente:vendax-a"},
+		Limit: 5,
+	})
+	if err != nil {
+		t.Fatalf("busca: %v", err)
+	}
+
+	if resp.Total == 0 {
+		t.Fatal("resultado vazio — a consulta precisa casar, senão o teste vira tautologia")
+	}
+	if resp.Total != 1 {
+		t.Fatalf("esperava 1 resultado, veio %d: %+v", resp.Total, resp.Results)
+	}
+	if resp.Results[0].ID != "a" {
+		t.Errorf("voltou a memória do cliente errado: %s", resp.Results[0].ID)
+	}
+	// E o recorte tem que chegar ao repositório, não ser aplicado depois.
+	if len(repo.fullTextTagScopes) == 0 || !reflect.DeepEqual(repo.fullTextTagScopes[0], []string{"cliente:vendax-a"}) {
+		t.Errorf("o filtro precisa ir para a consulta; escopos recebidos: %v", repo.fullTextTagScopes)
+	}
+}
+
+// Duas tags exigem as duas: uma busca por cliente:A + tipo:recusa não pode
+// devolver tudo que é tipo:recusa.
+func TestSearchMemories_MultipleTagsRequireAll(t *testing.T) {
+	const fato = "nao trabalha com a marca do produto"
+	repo := &fakeMemoryRepository{
+		fullTextResults: []domain.Memory{
+			{ID: "recusa-a", Content: fato, Tags: []string{"cliente:vendax-a", "tipo:recusa"}},
+			{ID: "compra-a", Content: fato, Tags: []string{"cliente:vendax-a", "tipo:compra"}},
+			{ID: "recusa-b", Content: fato, Tags: []string{"cliente:vendax-b", "tipo:recusa"}},
+		},
+	}
+	svc := &MemoryService{memoryRepo: repo}
+
+	resp, err := svc.SearchMemories(context.Background(), dto.SearchRequest{
+		Query: "nao trabalha com a marca",
+		Tags:  []string{"cliente:vendax-a", "tipo:recusa"},
+		Limit: 5,
+	})
+	if err != nil {
+		t.Fatalf("busca: %v", err)
+	}
+	if resp.Total != 1 || resp.Results[0].ID != "recusa-a" {
+		t.Errorf("esperava só recusa-a, veio %d: %+v", resp.Total, resp.Results)
+	}
+}
+
+// Sem tags o comportamento é o de hoje: sem recorte. Não mudar esse caso é
+// parte do contrato — a Fatia A já está escrita contra ele.
+func TestSearchMemories_NoTagsMeansNoScope(t *testing.T) {
+	const fato = "nao trabalha com a marca do produto"
+	repo := &fakeMemoryRepository{
+		fullTextResults: []domain.Memory{
+			{ID: "a", Content: fato, Tags: []string{"cliente:vendax-a"}},
+			{ID: "b", Content: fato, Tags: []string{"cliente:vendax-b"}},
+		},
+	}
+	svc := &MemoryService{memoryRepo: repo}
+
+	resp, err := svc.SearchMemories(context.Background(), dto.SearchRequest{
+		Query: "nao trabalha com a marca", Limit: 5,
+	})
+	if err != nil {
+		t.Fatalf("busca: %v", err)
+	}
+	if resp.Total != 2 {
+		t.Errorf("sem tags deveria trazer os dois, veio %d", resp.Total)
+	}
+}
+
+// Não filtrar demais: a memória do cliente certo continua voltando quando ela
+// tem tags ALÉM das pedidas.
+func TestSearchMemories_ExtraTagsOnMemoryStillMatch(t *testing.T) {
+	const fato = "nao trabalha com a marca do produto"
+	repo := &fakeMemoryRepository{
+		fullTextResults: []domain.Memory{
+			{ID: "a", Content: fato, Tags: []string{"cliente:vendax-a", "tipo:recusa", "vendedor:v-77"}},
+		},
+	}
+	svc := &MemoryService{memoryRepo: repo}
+
+	resp, err := svc.SearchMemories(context.Background(), dto.SearchRequest{
+		Query: "nao trabalha com a marca",
+		Tags:  []string{"cliente:vendax-a"},
+		Limit: 5,
+	})
+	if err != nil {
+		t.Fatalf("busca: %v", err)
+	}
+	if resp.Total != 1 {
+		t.Errorf("tags extras na memória não podem excluí-la; veio %d", resp.Total)
 	}
 }

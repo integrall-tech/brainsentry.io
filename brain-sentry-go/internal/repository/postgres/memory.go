@@ -255,7 +255,36 @@ func (r *MemoryRepository) FindByImportance(ctx context.Context, importance doma
 
 // FullTextSearch performs a PostgreSQL full-text search on content and summary.
 func (r *MemoryRepository) FullTextSearch(ctx context.Context, query string, limit int) ([]domain.Memory, error) {
+	return r.FullTextSearchScoped(ctx, query, limit, nil)
+}
+
+// FullTextSearchScoped is FullTextSearch restricted to memories carrying ALL
+// of the given tags.
+//
+// The scoping is a WHERE clause, not a post-filter, and that placement is the
+// whole point: the LIMIT is applied by the database AFTER the restriction. A
+// filter applied in Go, after the query returned its top N, would silently
+// return fewer rows than exist — turning a leak into "this customer has no
+// such fact", which is worse because it looks like an answer.
+//
+// Empty tags means no restriction, which keeps every existing caller
+// (interception, retrieval planner, cross-session) behaving exactly as before.
+func (r *MemoryRepository) FullTextSearchScoped(ctx context.Context, query string, limit int, tags []string) ([]domain.Memory, error) {
 	tenantID := tenant.FromContext(ctx)
+
+	args := []any{tenantID, query}
+	scope := ""
+	if len(tags) > 0 {
+		// count(DISTINCT) = len(tags) means "carries all of them". Requiring
+		// all, rather than any, is what the consumer already assumes: a search
+		// scoped to cliente:X AND tipo:recusa must not return everything
+		// tagged tipo:recusa.
+		args = append(args, tags, len(tags))
+		scope = fmt.Sprintf(` AND (SELECT count(DISTINCT mt.tag) FROM memory_tags mt
+			WHERE mt.memory_id = memories.id AND mt.tag = ANY($%d)) = $%d`,
+			len(args)-1, len(args))
+	}
+	args = append(args, limit)
 
 	// Use PostgreSQL full-text search with ts_rank for relevance ordering.
 	// plainto_tsquery handles user input safely (no special syntax needed).
@@ -264,11 +293,11 @@ func (r *MemoryRepository) FullTextSearch(ctx context.Context, query string, lim
 		AND deleted_at IS NULL
 		AND (valid_from IS NULL OR valid_from <= NOW())
 		AND (valid_to IS NULL OR valid_to > NOW())
-		AND COALESCE(superseded_by, '') = ''
+		AND COALESCE(superseded_by, '') = ''%s
 		ORDER BY ts_rank(to_tsvector('english', coalesce(content,'') || ' ' || coalesce(summary,'')), plainto_tsquery('english', $2)) DESC
-		LIMIT $3`, memoryColumns)
+		LIMIT $%d`, memoryColumns, scope, len(args))
 
-	rows, err := r.pool.Query(ctx, q, tenantID, query, limit)
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("full text search: %w", err)
 	}
@@ -867,4 +896,49 @@ func (r *MemoryRepository) FindBySourceReference(ctx context.Context, sourceRefe
 		return nil, fmt.Errorf("finding memory by source reference: %w", err)
 	}
 	return m, nil
+}
+
+// FindByIDsScoped loads memories by id, keeping only those that carry ALL the
+// given tags, in one query.
+//
+// Exists for the vector-search path: FalkorDB returns ids ranked by similarity
+// and those ids used to be resolved one FindByID at a time, with no scope
+// check — so a memory belonging to another customer entered the candidate set
+// and was merely ranked lower, not excluded. Filtering here, in SQL, keeps the
+// exclusion in the same place as the full-text path instead of scattering it.
+//
+// Empty tags means no restriction.
+func (r *MemoryRepository) FindByIDsScoped(ctx context.Context, ids []string, tags []string) ([]domain.Memory, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	args := []any{tenant.FromContext(ctx), ids}
+	scope := ""
+	if len(tags) > 0 {
+		args = append(args, tags, len(tags))
+		scope = fmt.Sprintf(` AND (SELECT count(DISTINCT mt.tag) FROM memory_tags mt
+			WHERE mt.memory_id = memories.id AND mt.tag = ANY($%d)) = $%d`,
+			len(args)-1, len(args))
+	}
+
+	q := fmt.Sprintf(`SELECT %s FROM memories
+		WHERE tenant_id = $1 AND id = ANY($2) AND deleted_at IS NULL%s`,
+		memoryColumns, scope)
+
+	rows, err := r.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("finding memories by ids: %w", err)
+	}
+	defer rows.Close()
+
+	memories, err := scanMemories(rows)
+	if err != nil {
+		return nil, err
+	}
+	for i := range memories {
+		t, _ := r.loadTags(ctx, memories[i].ID)
+		memories[i].Tags = t
+	}
+	return memories, nil
 }

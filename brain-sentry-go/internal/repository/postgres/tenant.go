@@ -140,3 +140,42 @@ func (r *TenantRepository) Delete(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// TenantStats is the per-tenant row the admin UI lists.
+type TenantStats struct {
+	TenantID          string `json:"tenantId"`
+	MemoryCount       int64  `json:"memoryCount"`
+	UserCount         int64  `json:"userCount"`
+	RelationshipCount int64  `json:"relationshipCount"`
+}
+
+// Stats returns counts per tenant.
+//
+// Counts come from a LEFT JOIN on the tenant list so a tenant with no data
+// still appears with zeros: the admin UI keys its table by tenantId, and a
+// missing row would render blank cells that read as "loading" rather than
+// "empty".
+func (r *TenantRepository) Stats(ctx context.Context) ([]TenantStats, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT t.id,
+		       (SELECT count(*) FROM memories m
+		         WHERE m.tenant_id = t.id AND m.deleted_at IS NULL),
+		       (SELECT count(*) FROM users u WHERE u.tenant_id = t.id),
+		       (SELECT count(*) FROM memory_relationships mr WHERE mr.tenant_id = t.id)
+		FROM tenants t
+		ORDER BY t.created_at`)
+	if err != nil {
+		return nil, fmt.Errorf("computing tenant stats: %w", err)
+	}
+	defer rows.Close()
+
+	out := []TenantStats{}
+	for rows.Next() {
+		var s TenantStats
+		if err := rows.Scan(&s.TenantID, &s.MemoryCount, &s.UserCount, &s.RelationshipCount); err != nil {
+			return nil, fmt.Errorf("scanning tenant stats: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
