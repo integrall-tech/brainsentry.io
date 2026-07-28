@@ -192,8 +192,21 @@ POST /v1/memories/search
 }
 ```
 
-A tag de cliente é o que mantém o escopo. **O Brain Sentry não a impõe** — se o
-Core esquecer, virá memória de outro cliente do mesmo tenant.
+**`tags` é filtro do conjunto, não peso.** A memória precisa carregar **todas**
+as tags informadas para entrar no resultado, e o recorte é aplicado no SQL,
+antes do `limit` — não é um pós-filtro que devolveria menos do que existe.
+
+`tags` ausente ou vazio significa "sem recorte", e é aí que mora a
+responsabilidade do Core: **mandar `cliente:{ref}` em toda busca**. O Brain
+Sentry aplica o recorte que você pedir; ele não adivinha qual cliente é.
+
+> Uma versão anterior deste guia dizia que a tag "mantinha o escopo" mas que o
+> Brain Sentry "não a impunha". A primeira parte era falsa e a segunda,
+> enganosa: até 28/07 a tag entrava só no cálculo de pontuação, então mesmo o
+> Core **enviando** a tag vinha memória de outro cliente — apenas ranqueada
+> abaixo. Corrigido; se você escreveu um teste de isolamento antes disso,
+> verifique se ele usava uma consulta que **casa** com o conteúdo: com consulta
+> genérica o resultado é 0 e o teste passa sem ter filtrado nada.
 
 Resposta:
 

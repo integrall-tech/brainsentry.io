@@ -124,3 +124,21 @@ func (h *TenantHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"message": "tenant deleted"})
 }
+
+// Stats handles GET /v1/tenants/stats
+//
+//	@Summary		Per-tenant counts for the admin UI
+//	@Description	Memórias, usuários e relacionamentos por tenant. A tela de tenants já consumia esta rota, que não existia e devolvia 404.
+//	@Tags			Tenants
+//	@Produce		json
+//	@Success		200	{array}		postgres.TenantStats
+//	@Security		BearerAuth
+//	@Router			/v1/tenants/stats [get]
+func (h *TenantHandler) Stats(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.tenantRepo.Stats(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to compute tenant stats")
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}

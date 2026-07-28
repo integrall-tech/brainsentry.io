@@ -28,14 +28,14 @@ type MemoryService struct {
 	autoImportance   bool
 
 	// Optional pipeline enhancers (set via With* methods). When nil, behavior is unchanged.
-	compressor     *MemoryCompressionService     // extracts facts/concepts on create
-	queryExpander  *QueryExpansionService        // expands search queries
-	stripper       *PrivacyStrippingService      // strips secrets before storage
-	tripletSvc     *TripletExtractionService     // extracts S-P-O triplets
-	stalenessSvc   *CascadingStalenessService    // propagates staleness on supersede
-	feedbackSvc    *FeedbackLearningService      // blends feedback into scoring
-	eventSvc       *EventService                 // async event extraction on create
-	scheduler      *TaskScheduler                // durable queue for heavy extractions (optional)
+	compressor    *MemoryCompressionService  // extracts facts/concepts on create
+	queryExpander *QueryExpansionService     // expands search queries
+	stripper      *PrivacyStrippingService   // strips secrets before storage
+	tripletSvc    *TripletExtractionService  // extracts S-P-O triplets
+	stalenessSvc  *CascadingStalenessService // propagates staleness on supersede
+	feedbackSvc   *FeedbackLearningService   // blends feedback into scoring
+	eventSvc      *EventService              // async event extraction on create
+	scheduler     *TaskScheduler             // durable queue for heavy extractions (optional)
 }
 
 // WithCompressor enables LLM-driven content compression during CreateMemory.
@@ -101,6 +101,8 @@ type memoryRepository interface {
 	FindByCategory(ctx context.Context, category domain.MemoryCategory) ([]domain.Memory, error)
 	FindByImportance(ctx context.Context, importance domain.ImportanceLevel) ([]domain.Memory, error)
 	FullTextSearch(ctx context.Context, query string, limit int) ([]domain.Memory, error)
+	FullTextSearchScoped(ctx context.Context, query string, limit int, tags []string) ([]domain.Memory, error)
+	FindByIDsScoped(ctx context.Context, ids []string, tags []string) ([]domain.Memory, error)
 	IncrementAccessCount(ctx context.Context, id string) error
 	RecordFeedback(ctx context.Context, id string, helpful bool) error
 	FindSimHashes(ctx context.Context) (map[string]string, error)
@@ -681,12 +683,24 @@ func (s *MemoryService) SearchMemories(ctx context.Context, req dto.SearchReques
 			embedding := s.embeddingService.Embed(q)
 			ids, scores, err := s.memoryGraphRepo.VectorSearch(ctx, embedding, limit*2, tenant.FromContext(ctx))
 			if err == nil {
+				// Resolve the ids in ONE scoped query. The tags are a filter
+				// here, not a score: a memory outside the requested scope must
+				// not enter the candidate set at all. Previously each id was
+				// loaded individually with no scope check, so another
+				// customer's memory merely ranked lower — and still came back.
+				scoreByID := make(map[string]float64, len(ids))
 				for i, id := range ids {
-					m, err := s.memoryRepo.FindByID(ctx, id)
-					if err != nil || isInactiveMemory(m, time.Now()) {
-						continue
+					scoreByID[id] = scores[i]
+				}
+				found, err := s.memoryRepo.FindByIDsScoped(ctx, ids, req.Tags)
+				if err == nil {
+					for i := range found {
+						m := &found[i]
+						if isInactiveMemory(m, time.Now()) {
+							continue
+						}
+						addScored(m, scoreByID[m.ID])
 					}
-					addScored(m, scores[i])
 				}
 			}
 		}
@@ -694,7 +708,7 @@ func (s *MemoryService) SearchMemories(ctx context.Context, req dto.SearchReques
 
 	// Full-text search as fallback/supplement (primary query only to avoid duplicate work)
 	if len(scoredByID) < limit {
-		textResults, err := s.memoryRepo.FullTextSearch(ctx, req.Query, limit)
+		textResults, err := s.memoryRepo.FullTextSearchScoped(ctx, req.Query, limit, req.Tags)
 		if err == nil {
 			for i := range textResults {
 				m := &textResults[i]

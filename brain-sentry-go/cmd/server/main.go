@@ -925,6 +925,8 @@ func main() {
 		// Tenants (admin-only for write operations)
 		r.Route("/v1/tenants", func(r chi.Router) {
 			r.Get("/", tenantHandler.List)
+			// Antes de /{id}: chi casaria "stats" como um id e a rota nunca seria alcancada.
+			r.Get("/stats", tenantHandler.Stats)
 			r.Get("/{id}", tenantHandler.GetByID)
 			r.With(middleware.RequireRole(middleware.RoleAdmin)).Post("/", tenantHandler.Create)
 			r.With(middleware.RequireRole(middleware.RoleAdmin)).Put("/{id}", tenantHandler.Update)
